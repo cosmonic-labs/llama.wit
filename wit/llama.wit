@@ -1,0 +1,144 @@
+package cosmonic:llama-cpp;
+
+/// LLM inference over llama.cpp.
+///
+/// The two central resources mirror llama.cpp's own layering:
+/// - `model`: immutable weights + vocabulary, loaded once from a GGUF file.
+/// - `context`: mutable inference state (the KV cache) over a borrowed model.
+interface api {
+    /// Options for loading a model. Omitted params (`option::none`) use
+    /// llama.cpp defaults.
+    record model-params {
+        /// Number of transformer layers to offload to a GPU backend.
+        /// Ignored when no GPU backend is compiled in.
+        n-gpu-layers: u32,
+    }
+
+    /// Options for creating a context.
+    record context-params {
+        /// Size of the context window in tokens (prompt + generation).
+        /// Defaults to 4096. Values beyond `model.n-ctx-train` degrade quality.
+        n-ctx: u32,
+        /// Max tokens processed per decode step; caps the chunk size used
+        /// when feeding long prompts. Defaults to 512.
+        n-batch: u32,
+    }
+
+    /// Sampling configuration for `sampler`.
+    ///
+    /// Samplers are applied as a chain (top-k, then top-p, then min-p, then
+    /// temperature) followed by a seeded random pick, matching llama.cpp's
+    /// conventions. `temp <= 0` selects greedy sampling and ignores every
+    /// other field.
+    record sampler-params {
+        /// Temperature. Higher = more random; `<= 0` = greedy (deterministic).
+        temp: f32,
+        /// Keep only the `top-k` most likely tokens. `0` disables.
+        top-k: u32,
+        /// Nucleus sampling: keep tokens covering this probability mass.
+        /// `>= 1` disables.
+        top-p: f32,
+        /// Drop tokens below `min-p` times the top token's probability.
+        /// `0` disables.
+        min-p: f32,
+        /// Seed for the random pick, for reproducible sampling.
+        seed: u64,
+    }
+
+    /// One turn of a conversation, for `model.apply-chat-template`.
+    record chat-message {
+        /// Typically "system", "user", or "assistant".
+        role: string,
+        content: string,
+    }
+
+    /// A loaded model (weights + vocabulary). Immutable; any number of
+    /// contexts can be created from one model.
+    resource model {
+        /// Load a GGUF model from `path` (resolved inside the preopened
+        /// directories). Fails with a message if the file is missing or not
+        /// a valid model.
+        constructor(path: string, params: option<model-params>) -> result<model, string>;
+
+        /// Convert text to tokens.
+        ///
+        /// `add-special` prepends the model's start tokens (e.g. BOS) — set
+        /// it for the beginning of a sequence, not for continuations.
+        tokenize: func(text: string, add-special: bool) -> result<list<u32>, string>;
+
+        /// Convert tokens back to text.
+        detokenize: func(tokens: list<u32>) -> result<string, string>;
+
+        /// Whether `token` ends generation (end-of-sequence, end-of-turn, ...).
+        is-eog: func(token: u32) -> bool;
+
+        /// Format a conversation with the model's built-in chat template.
+        ///
+        /// With `add-assistant` the returned string ends with the prompt for
+        /// the assistant's next reply (use before generating); without it the
+        /// conversation is closed after the last message (use to measure how
+        /// much of the transcript has already been formatted).
+        /// Fails if the model ships no chat template.
+        apply-chat-template: func(messages: list<chat-message>, add-assistant: bool) -> result<string, string>;
+
+        /// Short human-readable description (architecture, size, quantization).
+        description: func() -> string;
+
+        /// Context length the model was trained with.
+        n-ctx-train: func() -> u32;
+    }
+
+    /// Inference state over a model: holds the KV cache, so text fed via
+    /// `append`/`append-tokens` persists and generation continues from where
+    /// the context left off. This is what makes multi-turn chat cheap: feed
+    /// only each turn's delta instead of re-processing the transcript.
+    ///
+    /// The model must outlive every context created from it.
+    resource context {
+        constructor(model: borrow<model>, params: option<context-params>) -> result<context, string>;
+
+        /// Tokenize `text` and feed it into the context (grows the KV cache),
+        /// without generating. Start tokens are added automatically when the
+        /// context is empty.
+        append: func(text: string) -> result<_, string>;
+
+        /// Same, for pre-tokenized input (see `model.tokenize`). Useful to
+        /// control chunking: each call decodes at most `n-batch` tokens at a
+        /// time, and callers can split work into several calls (e.g. to drive
+        /// a progress indicator between them).
+        append-tokens: func(tokens: list<u32>) -> result<_, string>;
+
+        /// Number of tokens in the context so far (appended + generated).
+        n-past: func() -> u32;
+
+        /// Reset to an empty context (clears the KV cache).
+        clear: func();
+    }
+
+    /// A sampler chain (mirrors `llama_sampler_chain`). Generation is a
+    /// caller-side loop over the primitives, as in llama.cpp itself:
+    ///
+    ///   let tok = sampler.sample(ctx);        // pick from last logits
+    ///   if model.is-eog(tok) { done }
+    ///   text += model.detokenize([tok]);
+    ///   ctx.append-tokens([tok]);             // decode; makes next logits
+    ///
+    /// The context must be non-empty (append a prompt first).
+    resource sampler {
+        /// `none` = greedy sampling.
+        constructor(params: option<sampler-params>);
+
+        /// Sample one token from the context's current logits.
+        sample: func(ctx: borrow<context>) -> u32;
+    }
+}
+
+/// Implemented by the llama-cpp-wit component.
+world provider {
+    export api;
+}
+
+/// For components consuming the interface (e.g. the chat CLI).
+world consumer {
+    import api;
+}
