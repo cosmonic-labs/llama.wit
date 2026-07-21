@@ -55,10 +55,11 @@ interface api {
     /// A loaded model (weights + vocabulary). Immutable; any number of
     /// contexts can be created from one model.
     resource model {
-        /// Load a GGUF model from `path` (resolved inside the preopened
-        /// directories). Fails with a message if the file is missing or not
-        /// a valid model.
-        constructor(path: string, params: option<model-params>) -> result<model, string>;
+        /// Load a model from the raw bytes of a GGUF file. The caller reads the
+        /// file (or otherwise obtains the bytes) and passes them in, so the
+        /// provider itself does no filesystem I/O. Fails with a message if the
+        /// bytes are not a valid model.
+        constructor(data: list<u8>, params: option<model-params>) -> result<model, string>;
 
         /// Convert text to tokens.
         ///
