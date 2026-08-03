@@ -15,6 +15,34 @@ cmake --build build
 
 Output at `build/llama.wasm`
 
+## WebGPU backend (optional, experimental)
+
+Builds the `ggml-webgpu` backend for WASI so the component offloads to the host's
+`wasi:webgpu` implementation (set `n-gpu-layers > 0` in `model-params`). This
+replicates the fork's "with WebGPU" commit as an overlay patch on the pinned
+llama.cpp release — see [patches/0001-ggml-webgpu-wasi.patch](patches/0001-ggml-webgpu-wasi.patch).
+
+The two webgpu deps are fetched from GitHub automatically (their `wasm-cg-demo`
+branches), so no extra flags are needed:
+- [wasi-webgpu-headers](https://github.com/MendyBerger/wasi-webgpu-headers/tree/wasm-cg-demo) — `webgpu.h` over `wasi:webgpu@0.3.0-rc.2`
+- [dawn_wasi_webgpu_cpp](https://github.com/MendyBerger/dawn_wasi_webgpu_cpp/tree/wasm-cg-demo) — Dawn's `webgpu_cpp.h` wrapper for WASI
+
+```shell
+cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasip3.toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DLLAMA_WIT_WEBGPU=ON
+cmake --build build
+```
+
+To build against local checkouts instead of fetching, point at them (this skips
+the fetch): `-DWASI_WEBGPU_HEADERS_DIR=/path/... -DDAWN_WASI_WEBGPU_DIR=/path/...`.
+Override the fetched refs with `-DWASI_WEBGPU_HEADERS_TAG=...` / `-DDAWN_WASI_WEBGPU_TAG=...`.
+
+The resulting `llama.wasm` additionally imports `wasi:webgpu/webgpu@0.3.0-rc.2`
+(+ `wasi-gfx:surface`), which the host must provide. This path is unproven
+end-to-end on wasip3; expect to shake out linker/componentization issues (e.g.
+duplicate `cabi_realloc` across the two `component-type` objects). If the patch
+ever fails to apply against a newer `LLAMA_GIT_TAG`, pin `-DLLAMA_GIT_TAG=b9886`
+(the tag the WebGPU work was based on) or refresh the patch.
+
 ## Generate Bindings
 ```shell
 cmake --build build --target regenerate-bindings

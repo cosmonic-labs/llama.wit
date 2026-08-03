@@ -1,0 +1,106 @@
+diff --git a/ggml/src/ggml-webgpu/CMakeLists.txt b/ggml/src/ggml-webgpu/CMakeLists.txt
+index 1503a1ef8..559efffd5 100644
+--- a/ggml/src/ggml-webgpu/CMakeLists.txt
++++ b/ggml/src/ggml-webgpu/CMakeLists.txt
+@@ -59,6 +59,34 @@ if(EMSCRIPTEN)
+         target_compile_options(ggml-webgpu PRIVATE "-fexceptions")
+         target_link_options(ggml-webgpu INTERFACE "-sASYNCIFY" "-exceptions")
+     endif()
++elseif(CMAKE_SYSTEM_NAME STREQUAL "WASI")
++    # WebGPU via the wasi:webgpu component-model interface: Dawn's C++ wrapper
++    # adapted for wasi (dawn_wasi_webgpu_cpp) on top of the wasi-webgpu-headers
++    # C implementation (webgpu.h lowered onto wit-bindgen'd wasi:webgpu imports).
++    set(DAWN_WASI_WEBGPU_DIR "/media/mendyberger/USB-Card/wasi/dawn_wasi_webgpu_cpp"
++        CACHE PATH "Path to dawn_wasi_webgpu_cpp (Dawn C++ webgpu.h wrapper for wasi)")
++    set(WASI_WEBGPU_HEADERS_DIR "/media/mendyberger/USB-Card/wasi/wasi-webgpu-headers"
++        CACHE PATH "Path to wasi-webgpu-headers (webgpu.h implementation over wasi:webgpu)")
++
++    # ggml includes <webgpu/webgpu_cpp.h>; the wrapper keeps its headers at the
++    # repo root, so expose them under a webgpu/ prefix via symlinks.
++    set(_wasi_webgpu_inc "${CMAKE_CURRENT_BINARY_DIR}/wasi-webgpu-include")
++    file(MAKE_DIRECTORY "${_wasi_webgpu_inc}/webgpu")
++    foreach(hdr webgpu_cpp.h webgpu_cpp_chained_struct.h webgpu_enum_class_bitmasks.h)
++        file(CREATE_LINK "${DAWN_WASI_WEBGPU_DIR}/${hdr}" "${_wasi_webgpu_inc}/webgpu/${hdr}" SYMBOLIC)
++    endforeach()
++
++    target_sources(ggml-webgpu PRIVATE
++        "${WASI_WEBGPU_HEADERS_DIR}/webgpu.c"
++        "${WASI_WEBGPU_HEADERS_DIR}/async_futures.c"
++        "${WASI_WEBGPU_HEADERS_DIR}/imports.c"
++        "${WASI_WEBGPU_HEADERS_DIR}/imports_component_type.o"
++    )
++    target_include_directories(ggml-webgpu PRIVATE
++        "${_wasi_webgpu_inc}"
++        "${WASI_WEBGPU_HEADERS_DIR}"
++    )
++    set(DawnWebGPU_TARGET "")
+ else()
+     find_package(Dawn REQUIRED)
+     set(DawnWebGPU_TARGET dawn::webgpu_dawn)
+diff --git a/ggml/src/ggml-webgpu/ggml-webgpu.cpp b/ggml/src/ggml-webgpu/ggml-webgpu.cpp
+index 29025e9ba..e5faec39a 100644
+--- a/ggml/src/ggml-webgpu/ggml-webgpu.cpp
++++ b/ggml/src/ggml-webgpu/ggml-webgpu.cpp
+@@ -3793,7 +3793,7 @@ static void ggml_webgpu_init_memset_pipeline(webgpu_global_context & ctx) {
+ static void ggml_backend_webgpu_request_adapter(wgpu::Instance & instance, wgpu::Adapter & adapter) {
+     wgpu::RequestAdapterOptions options = {};
+ 
+-#ifndef __EMSCRIPTEN__
++#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)  // Dawn-native only
+     // TODO: track need for these toggles: https://issues.chromium.org/issues/42251215
+     const char * const          adapterEnabledToggles[] = { "vulkan_enable_f16_on_nvidia", "use_vulkan_memory_model" };
+     wgpu::DawnTogglesDescriptor adapterTogglesDesc;
+@@ -3821,7 +3821,7 @@ static void create_webgpu_device(ggml_backend_webgpu_reg_context * ctx) {
+     ctx->webgpu_global_ctx->adapter.GetLimits(&ctx->webgpu_global_ctx->capabilities.limits);
+ 
+     wgpu::AdapterInfo info{};
+-#ifndef __EMSCRIPTEN__
++#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)  // Dawn-native only
+     wgpu::AdapterPropertiesSubgroupMatrixConfigs subgroup_matrix_configs{};
+     if (ctx->webgpu_global_ctx->adapter.HasFeature(wgpu::FeatureName::ChromiumExperimentalSubgroupMatrix)) {
+         info.nextInChain = &subgroup_matrix_configs;
+@@ -3838,7 +3838,7 @@ static void create_webgpu_device(ggml_backend_webgpu_reg_context * ctx) {
+         wgpu::WGSLLanguageFeatureName::Packed4x8IntegerDotProduct);
+ 
+     bool valid_subgroup_matrix_config = false;
+-#ifndef __EMSCRIPTEN__
++#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)  // Dawn-native only
+     // Accept f16 subgroup matrix configurations (square or non-square).
+     // NVIDIA GPUs typically report square configs (e.g. 16x16x16),
+     // while Intel Xe2 GPUs report non-square configs (e.g. 8x16x16).
+@@ -3866,7 +3866,7 @@ static void create_webgpu_device(ggml_backend_webgpu_reg_context * ctx) {
+     // Initialize device
+     std::vector<wgpu::FeatureName> required_features       = { wgpu::FeatureName::ShaderF16 };
+ 
+-#ifndef __EMSCRIPTEN__
++#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)  // Dawn-native only
+     required_features.push_back(wgpu::FeatureName::ImplicitDeviceSynchronization);
+     if (ctx->webgpu_global_ctx->capabilities.supports_subgroup_matrix) {
+         required_features.push_back(wgpu::FeatureName::ChromiumExperimentalSubgroupMatrix);
+@@ -3902,7 +3902,7 @@ static void create_webgpu_device(ggml_backend_webgpu_reg_context * ctx) {
+                        std::string(message).c_str());
+         });
+ 
+-#ifndef __EMSCRIPTEN__
++#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)  // Dawn-native only
+     // Enable Dawn-specific toggles to increase native performance
+     // TODO: Maybe WebGPU needs a "fast" mode where you can request compilers skip adding checks like these,
+     //       only for native performance?
+@@ -4536,7 +4536,7 @@ ggml_backend_reg_t ggml_backend_webgpu_reg() {
+     instance_descriptor.requiredFeatures                     = instance_features.data();
+     instance_descriptor.requiredFeatureCount                 = instance_features.size();
+ 
+-#ifndef __EMSCRIPTEN__
++#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)  // Dawn-native only
+     const char * const          instanceEnabledToggles[] = { "allow_unsafe_apis" };
+     wgpu::DawnTogglesDescriptor instanceTogglesDesc;
+     instanceTogglesDesc.enabledToggles     = instanceEnabledToggles;
+@@ -4556,7 +4556,7 @@ ggml_backend_reg_t ggml_backend_webgpu_reg() {
+ 
+     // WebGPU backend requires f16 support and, on native, implicit device synchronization.
+     if (adapter != nullptr && adapter.HasFeature(wgpu::FeatureName::ShaderF16)
+-#ifndef __EMSCRIPTEN__
++#if !defined(__EMSCRIPTEN__) && !defined(__wasi__)  // Dawn-native only
+         && adapter.HasFeature(wgpu::FeatureName::ImplicitDeviceSynchronization)
+ #endif
+     ) {

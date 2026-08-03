@@ -3,10 +3,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Exported Functions from `cosmonic:llama-cpp/api`
+// Exported Functions from `cosmonic-labs:llama-wit/api@0.1.0`
 
-__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api#[constructor]model")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_constructor_model_post_return(uint8_t * arg0) {
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic-labs:llama-wit/api@0.1.0#[constructor]model")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_constructor_model_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
     case 0: {
       break;
@@ -20,8 +20,8 @@ void __wasm_export_exports_cosmonic_llama_cpp_api_constructor_model_post_return(
   }
 }
 
-__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api#[method]model.tokenize")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_method_model_tokenize_post_return(uint8_t * arg0) {
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic-labs:llama-wit/api@0.1.0#[method]model.tokenize")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_method_model_tokenize_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
     case 0: {
       size_t len = *((size_t*) (arg0 + (2*sizeof(void*))));
@@ -44,8 +44,8 @@ void __wasm_export_exports_cosmonic_llama_cpp_api_method_model_tokenize_post_ret
   }
 }
 
-__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api#[method]model.detokenize")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_method_model_detokenize_post_return(uint8_t * arg0) {
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic-labs:llama-wit/api@0.1.0#[method]model.detokenize")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_method_model_detokenize_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
     case 0: {
       if ((*((size_t*) (arg0 + (2*sizeof(void*))))) > 0) {
@@ -63,8 +63,8 @@ void __wasm_export_exports_cosmonic_llama_cpp_api_method_model_detokenize_post_r
 }
 
 
-__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api#[method]model.apply-chat-template")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_method_model_apply_chat_template_post_return(uint8_t * arg0) {
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic-labs:llama-wit/api@0.1.0#[method]model.apply-chat-template")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_method_model_apply_chat_template_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
     case 0: {
       if ((*((size_t*) (arg0 + (2*sizeof(void*))))) > 0) {
@@ -81,16 +81,16 @@ void __wasm_export_exports_cosmonic_llama_cpp_api_method_model_apply_chat_templa
   }
 }
 
-__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api#[method]model.description")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_method_model_description_post_return(uint8_t * arg0) {
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic-labs:llama-wit/api@0.1.0#[method]model.description")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_method_model_description_post_return(uint8_t * arg0) {
   if ((*((size_t*) (arg0 + sizeof(void*)))) > 0) {
     free(*((uint8_t **) (arg0 + 0)));
   }
 }
 
 
-__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api#[constructor]context")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_constructor_context_post_return(uint8_t * arg0) {
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic-labs:llama-wit/api@0.1.0#[constructor]context")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_constructor_context_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
     case 0: {
       break;
@@ -104,8 +104,8 @@ void __wasm_export_exports_cosmonic_llama_cpp_api_constructor_context_post_retur
   }
 }
 
-__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api#[method]context.append")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_append_post_return(uint8_t * arg0) {
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic-labs:llama-wit/api@0.1.0#[method]context.append")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_method_context_append_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
     case 0: {
       break;
@@ -119,8 +119,8 @@ void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_append_post_ret
   }
 }
 
-__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api#[method]context.append-tokens")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_append_tokens_post_return(uint8_t * arg0) {
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic-labs:llama-wit/api@0.1.0#[method]context.append-tokens")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_method_context_append_tokens_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
     case 0: {
       break;
@@ -154,87 +154,87 @@ static uint8_t RET_AREA[(3*sizeof(void*))];
 
 // Helper Functions
 
-void exports_cosmonic_llama_cpp_api_chat_message_free(exports_cosmonic_llama_cpp_api_chat_message_t *ptr) {
+void exports_cosmonic_labs_llama_wit_api_chat_message_free(exports_cosmonic_labs_llama_wit_api_chat_message_t *ptr) {
   provider_string_free(&ptr->role);
   provider_string_free(&ptr->content);
 }
 
-__attribute__((__import_module__("[export]cosmonic:llama-cpp/api"), __import_name__("[resource-drop]model")))
-extern void __wasm_import_exports_cosmonic_llama_cpp_api_model_drop(int32_t handle);
+__attribute__((__import_module__("[export]cosmonic-labs:llama-wit/api@0.1.0"), __import_name__("[resource-drop]model")))
+extern void __wasm_import_exports_cosmonic_labs_llama_wit_api_model_drop(int32_t handle);
 
-void exports_cosmonic_llama_cpp_api_model_drop_own(exports_cosmonic_llama_cpp_api_own_model_t handle) {
-  __wasm_import_exports_cosmonic_llama_cpp_api_model_drop(handle.__handle);
+void exports_cosmonic_labs_llama_wit_api_model_drop_own(exports_cosmonic_labs_llama_wit_api_own_model_t handle) {
+  __wasm_import_exports_cosmonic_labs_llama_wit_api_model_drop(handle.__handle);
 }
 
-__attribute__(( __import_module__("[export]cosmonic:llama-cpp/api"), __import_name__("[resource-new]model")))
-extern int32_t __wasm_import_exports_cosmonic_llama_cpp_api_model_new(int32_t);
+__attribute__(( __import_module__("[export]cosmonic-labs:llama-wit/api@0.1.0"), __import_name__("[resource-new]model")))
+extern int32_t __wasm_import_exports_cosmonic_labs_llama_wit_api_model_new(int32_t);
 
-__attribute__((__import_module__("[export]cosmonic:llama-cpp/api"), __import_name__("[resource-rep]model")))
-extern int32_t __wasm_import_exports_cosmonic_llama_cpp_api_model_rep(int32_t);
+__attribute__((__import_module__("[export]cosmonic-labs:llama-wit/api@0.1.0"), __import_name__("[resource-rep]model")))
+extern int32_t __wasm_import_exports_cosmonic_labs_llama_wit_api_model_rep(int32_t);
 
-exports_cosmonic_llama_cpp_api_own_model_t exports_cosmonic_llama_cpp_api_model_new(exports_cosmonic_llama_cpp_api_model_t *rep) {
-  return (exports_cosmonic_llama_cpp_api_own_model_t) { __wasm_import_exports_cosmonic_llama_cpp_api_model_new((int32_t) rep) };
+exports_cosmonic_labs_llama_wit_api_own_model_t exports_cosmonic_labs_llama_wit_api_model_new(exports_cosmonic_labs_llama_wit_api_model_t *rep) {
+  return (exports_cosmonic_labs_llama_wit_api_own_model_t) { __wasm_import_exports_cosmonic_labs_llama_wit_api_model_new((int32_t) rep) };
 }
 
-exports_cosmonic_llama_cpp_api_model_t* exports_cosmonic_llama_cpp_api_model_rep(exports_cosmonic_llama_cpp_api_own_model_t handle) {
-  return (exports_cosmonic_llama_cpp_api_model_t*) __wasm_import_exports_cosmonic_llama_cpp_api_model_rep(handle.__handle);
+exports_cosmonic_labs_llama_wit_api_model_t* exports_cosmonic_labs_llama_wit_api_model_rep(exports_cosmonic_labs_llama_wit_api_own_model_t handle) {
+  return (exports_cosmonic_labs_llama_wit_api_model_t*) __wasm_import_exports_cosmonic_labs_llama_wit_api_model_rep(handle.__handle);
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[dtor]model")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_model_dtor(exports_cosmonic_llama_cpp_api_model_t* arg) {
-  exports_cosmonic_llama_cpp_api_model_destructor(arg);
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[dtor]model")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_model_dtor(exports_cosmonic_labs_llama_wit_api_model_t* arg) {
+  exports_cosmonic_labs_llama_wit_api_model_destructor(arg);
 }
 
-__attribute__((__import_module__("[export]cosmonic:llama-cpp/api"), __import_name__("[resource-drop]context")))
-extern void __wasm_import_exports_cosmonic_llama_cpp_api_context_drop(int32_t handle);
+__attribute__((__import_module__("[export]cosmonic-labs:llama-wit/api@0.1.0"), __import_name__("[resource-drop]context")))
+extern void __wasm_import_exports_cosmonic_labs_llama_wit_api_context_drop(int32_t handle);
 
-void exports_cosmonic_llama_cpp_api_context_drop_own(exports_cosmonic_llama_cpp_api_own_context_t handle) {
-  __wasm_import_exports_cosmonic_llama_cpp_api_context_drop(handle.__handle);
+void exports_cosmonic_labs_llama_wit_api_context_drop_own(exports_cosmonic_labs_llama_wit_api_own_context_t handle) {
+  __wasm_import_exports_cosmonic_labs_llama_wit_api_context_drop(handle.__handle);
 }
 
-__attribute__(( __import_module__("[export]cosmonic:llama-cpp/api"), __import_name__("[resource-new]context")))
-extern int32_t __wasm_import_exports_cosmonic_llama_cpp_api_context_new(int32_t);
+__attribute__(( __import_module__("[export]cosmonic-labs:llama-wit/api@0.1.0"), __import_name__("[resource-new]context")))
+extern int32_t __wasm_import_exports_cosmonic_labs_llama_wit_api_context_new(int32_t);
 
-__attribute__((__import_module__("[export]cosmonic:llama-cpp/api"), __import_name__("[resource-rep]context")))
-extern int32_t __wasm_import_exports_cosmonic_llama_cpp_api_context_rep(int32_t);
+__attribute__((__import_module__("[export]cosmonic-labs:llama-wit/api@0.1.0"), __import_name__("[resource-rep]context")))
+extern int32_t __wasm_import_exports_cosmonic_labs_llama_wit_api_context_rep(int32_t);
 
-exports_cosmonic_llama_cpp_api_own_context_t exports_cosmonic_llama_cpp_api_context_new(exports_cosmonic_llama_cpp_api_context_t *rep) {
-  return (exports_cosmonic_llama_cpp_api_own_context_t) { __wasm_import_exports_cosmonic_llama_cpp_api_context_new((int32_t) rep) };
+exports_cosmonic_labs_llama_wit_api_own_context_t exports_cosmonic_labs_llama_wit_api_context_new(exports_cosmonic_labs_llama_wit_api_context_t *rep) {
+  return (exports_cosmonic_labs_llama_wit_api_own_context_t) { __wasm_import_exports_cosmonic_labs_llama_wit_api_context_new((int32_t) rep) };
 }
 
-exports_cosmonic_llama_cpp_api_context_t* exports_cosmonic_llama_cpp_api_context_rep(exports_cosmonic_llama_cpp_api_own_context_t handle) {
-  return (exports_cosmonic_llama_cpp_api_context_t*) __wasm_import_exports_cosmonic_llama_cpp_api_context_rep(handle.__handle);
+exports_cosmonic_labs_llama_wit_api_context_t* exports_cosmonic_labs_llama_wit_api_context_rep(exports_cosmonic_labs_llama_wit_api_own_context_t handle) {
+  return (exports_cosmonic_labs_llama_wit_api_context_t*) __wasm_import_exports_cosmonic_labs_llama_wit_api_context_rep(handle.__handle);
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[dtor]context")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_context_dtor(exports_cosmonic_llama_cpp_api_context_t* arg) {
-  exports_cosmonic_llama_cpp_api_context_destructor(arg);
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[dtor]context")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_context_dtor(exports_cosmonic_labs_llama_wit_api_context_t* arg) {
+  exports_cosmonic_labs_llama_wit_api_context_destructor(arg);
 }
 
-__attribute__((__import_module__("[export]cosmonic:llama-cpp/api"), __import_name__("[resource-drop]sampler")))
-extern void __wasm_import_exports_cosmonic_llama_cpp_api_sampler_drop(int32_t handle);
+__attribute__((__import_module__("[export]cosmonic-labs:llama-wit/api@0.1.0"), __import_name__("[resource-drop]sampler")))
+extern void __wasm_import_exports_cosmonic_labs_llama_wit_api_sampler_drop(int32_t handle);
 
-void exports_cosmonic_llama_cpp_api_sampler_drop_own(exports_cosmonic_llama_cpp_api_own_sampler_t handle) {
-  __wasm_import_exports_cosmonic_llama_cpp_api_sampler_drop(handle.__handle);
+void exports_cosmonic_labs_llama_wit_api_sampler_drop_own(exports_cosmonic_labs_llama_wit_api_own_sampler_t handle) {
+  __wasm_import_exports_cosmonic_labs_llama_wit_api_sampler_drop(handle.__handle);
 }
 
-__attribute__(( __import_module__("[export]cosmonic:llama-cpp/api"), __import_name__("[resource-new]sampler")))
-extern int32_t __wasm_import_exports_cosmonic_llama_cpp_api_sampler_new(int32_t);
+__attribute__(( __import_module__("[export]cosmonic-labs:llama-wit/api@0.1.0"), __import_name__("[resource-new]sampler")))
+extern int32_t __wasm_import_exports_cosmonic_labs_llama_wit_api_sampler_new(int32_t);
 
-__attribute__((__import_module__("[export]cosmonic:llama-cpp/api"), __import_name__("[resource-rep]sampler")))
-extern int32_t __wasm_import_exports_cosmonic_llama_cpp_api_sampler_rep(int32_t);
+__attribute__((__import_module__("[export]cosmonic-labs:llama-wit/api@0.1.0"), __import_name__("[resource-rep]sampler")))
+extern int32_t __wasm_import_exports_cosmonic_labs_llama_wit_api_sampler_rep(int32_t);
 
-exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_sampler_new(exports_cosmonic_llama_cpp_api_sampler_t *rep) {
-  return (exports_cosmonic_llama_cpp_api_own_sampler_t) { __wasm_import_exports_cosmonic_llama_cpp_api_sampler_new((int32_t) rep) };
+exports_cosmonic_labs_llama_wit_api_own_sampler_t exports_cosmonic_labs_llama_wit_api_sampler_new(exports_cosmonic_labs_llama_wit_api_sampler_t *rep) {
+  return (exports_cosmonic_labs_llama_wit_api_own_sampler_t) { __wasm_import_exports_cosmonic_labs_llama_wit_api_sampler_new((int32_t) rep) };
 }
 
-exports_cosmonic_llama_cpp_api_sampler_t* exports_cosmonic_llama_cpp_api_sampler_rep(exports_cosmonic_llama_cpp_api_own_sampler_t handle) {
-  return (exports_cosmonic_llama_cpp_api_sampler_t*) __wasm_import_exports_cosmonic_llama_cpp_api_sampler_rep(handle.__handle);
+exports_cosmonic_labs_llama_wit_api_sampler_t* exports_cosmonic_labs_llama_wit_api_sampler_rep(exports_cosmonic_labs_llama_wit_api_own_sampler_t handle) {
+  return (exports_cosmonic_labs_llama_wit_api_sampler_t*) __wasm_import_exports_cosmonic_labs_llama_wit_api_sampler_rep(handle.__handle);
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[dtor]sampler")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_sampler_dtor(exports_cosmonic_llama_cpp_api_sampler_t* arg) {
-  exports_cosmonic_llama_cpp_api_sampler_destructor(arg);
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[dtor]sampler")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_sampler_dtor(exports_cosmonic_labs_llama_wit_api_sampler_t* arg) {
+  exports_cosmonic_labs_llama_wit_api_sampler_destructor(arg);
 }
 
 void provider_list_u8_free(provider_list_u8_t *ptr) {
@@ -247,12 +247,12 @@ void provider_list_u8_free(provider_list_u8_t *ptr) {
   }
 }
 
-void exports_cosmonic_llama_cpp_api_option_model_params_free(exports_cosmonic_llama_cpp_api_option_model_params_t *ptr) {
+void exports_cosmonic_labs_llama_wit_api_option_model_params_free(exports_cosmonic_labs_llama_wit_api_option_model_params_t *ptr) {
   if (ptr->is_some) {
   }
 }
 
-void exports_cosmonic_llama_cpp_api_result_own_model_string_free(exports_cosmonic_llama_cpp_api_result_own_model_string_t *ptr) {
+void exports_cosmonic_labs_llama_wit_api_result_own_model_string_free(exports_cosmonic_labs_llama_wit_api_result_own_model_string_t *ptr) {
   if (!ptr->is_err) {
   } else {
     provider_string_free(&ptr->val.err);
@@ -269,7 +269,7 @@ void provider_list_u32_free(provider_list_u32_t *ptr) {
   }
 }
 
-void exports_cosmonic_llama_cpp_api_result_list_u32_string_free(exports_cosmonic_llama_cpp_api_result_list_u32_string_t *ptr) {
+void exports_cosmonic_labs_llama_wit_api_result_list_u32_string_free(exports_cosmonic_labs_llama_wit_api_result_list_u32_string_t *ptr) {
   if (!ptr->is_err) {
     provider_list_u32_free(&ptr->val.ok);
   } else {
@@ -277,7 +277,7 @@ void exports_cosmonic_llama_cpp_api_result_list_u32_string_free(exports_cosmonic
   }
 }
 
-void exports_cosmonic_llama_cpp_api_result_string_string_free(exports_cosmonic_llama_cpp_api_result_string_string_t *ptr) {
+void exports_cosmonic_labs_llama_wit_api_result_string_string_free(exports_cosmonic_labs_llama_wit_api_result_string_string_t *ptr) {
   if (!ptr->is_err) {
     provider_string_free(&ptr->val.ok);
   } else {
@@ -285,37 +285,37 @@ void exports_cosmonic_llama_cpp_api_result_string_string_free(exports_cosmonic_l
   }
 }
 
-void exports_cosmonic_llama_cpp_api_list_chat_message_free(exports_cosmonic_llama_cpp_api_list_chat_message_t *ptr) {
+void exports_cosmonic_labs_llama_wit_api_list_chat_message_free(exports_cosmonic_labs_llama_wit_api_list_chat_message_t *ptr) {
   size_t list_len = ptr->len;
   if (list_len > 0) {
-    exports_cosmonic_llama_cpp_api_chat_message_t *list_ptr = ptr->ptr;
+    exports_cosmonic_labs_llama_wit_api_chat_message_t *list_ptr = ptr->ptr;
     for (size_t i = 0; i < list_len; i++) {
-      exports_cosmonic_llama_cpp_api_chat_message_free(&list_ptr[i]);
+      exports_cosmonic_labs_llama_wit_api_chat_message_free(&list_ptr[i]);
     }
     free(list_ptr);
   }
 }
 
-void exports_cosmonic_llama_cpp_api_option_context_params_free(exports_cosmonic_llama_cpp_api_option_context_params_t *ptr) {
+void exports_cosmonic_labs_llama_wit_api_option_context_params_free(exports_cosmonic_labs_llama_wit_api_option_context_params_t *ptr) {
   if (ptr->is_some) {
   }
 }
 
-void exports_cosmonic_llama_cpp_api_result_own_context_string_free(exports_cosmonic_llama_cpp_api_result_own_context_string_t *ptr) {
+void exports_cosmonic_labs_llama_wit_api_result_own_context_string_free(exports_cosmonic_labs_llama_wit_api_result_own_context_string_t *ptr) {
   if (!ptr->is_err) {
   } else {
     provider_string_free(&ptr->val.err);
   }
 }
 
-void exports_cosmonic_llama_cpp_api_result_void_string_free(exports_cosmonic_llama_cpp_api_result_void_string_t *ptr) {
+void exports_cosmonic_labs_llama_wit_api_result_void_string_free(exports_cosmonic_labs_llama_wit_api_result_void_string_t *ptr) {
   if (!ptr->is_err) {
   } else {
     provider_string_free(&ptr->val.err);
   }
 }
 
-void exports_cosmonic_llama_cpp_api_option_sampler_params_free(exports_cosmonic_llama_cpp_api_option_sampler_params_t *ptr) {
+void exports_cosmonic_labs_llama_wit_api_option_sampler_params_free(exports_cosmonic_labs_llama_wit_api_option_sampler_params_t *ptr) {
   if (ptr->is_some) {
   }
 }
@@ -347,9 +347,9 @@ void provider_string_free(provider_string_t *ret) {
 
 // Component Adapters
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[constructor]model")))
-uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_constructor_model(uint8_t * arg, size_t arg0, int32_t arg1, int32_t arg2) {
-  exports_cosmonic_llama_cpp_api_option_model_params_t option;
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[constructor]model")))
+uint8_t * __wasm_export_exports_cosmonic_labs_llama_wit_api_constructor_model(uint8_t * arg, size_t arg0, int32_t arg1, int32_t arg2) {
+  exports_cosmonic_labs_llama_wit_api_option_model_params_t option;
   switch (arg1) {
     case 0: {
       option.is_some = false;
@@ -357,17 +357,17 @@ uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_constructor_model(uint8_t
     }
     case 1: {
       option.is_some = true;
-      option.val = (exports_cosmonic_llama_cpp_api_model_params_t) {
+      option.val = (exports_cosmonic_labs_llama_wit_api_model_params_t) {
         (uint32_t) (uint32_t) (arg2),
       };
       break;
     }
   }
   provider_list_u8_t arg3 = (provider_list_u8_t) { (uint8_t*)(arg), (arg0) };
-  exports_cosmonic_llama_cpp_api_result_own_model_string_t ret;
-  exports_cosmonic_llama_cpp_api_own_model_t ok;
+  exports_cosmonic_labs_llama_wit_api_result_own_model_string_t ret;
+  exports_cosmonic_labs_llama_wit_api_own_model_t ok;
   provider_string_t err;
-  ret.is_err = !exports_cosmonic_llama_cpp_api_constructor_model(&arg3, option.is_some ? &(option.val) : NULL, &ok, &err);
+  ret.is_err = !exports_cosmonic_labs_llama_wit_api_constructor_model(&arg3, option.is_some ? &(option.val) : NULL, &ok, &err);
   if (ret.is_err) {
     ret.val.err = err;
   }
@@ -380,19 +380,19 @@ uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_constructor_model(uint8_t
     *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload4).len;
     *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload4).ptr;
   } else {
-    const exports_cosmonic_llama_cpp_api_own_model_t *payload = &(ret).val.ok;*((int8_t*)(ptr + 0)) = 0;
+    const exports_cosmonic_labs_llama_wit_api_own_model_t *payload = &(ret).val.ok;*((int8_t*)(ptr + 0)) = 0;
     *((int32_t*)(ptr + sizeof(void*))) = (*payload).__handle;
   }
   return ptr;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]model.tokenize")))
-uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_model_tokenize(uint8_t * arg, uint8_t * arg0, size_t arg1, int32_t arg2) {
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]model.tokenize")))
+uint8_t * __wasm_export_exports_cosmonic_labs_llama_wit_api_method_model_tokenize(uint8_t * arg, uint8_t * arg0, size_t arg1, int32_t arg2) {
   provider_string_t arg3 = (provider_string_t) { (uint8_t*)(arg0), (arg1) };
-  exports_cosmonic_llama_cpp_api_result_list_u32_string_t ret;
+  exports_cosmonic_labs_llama_wit_api_result_list_u32_string_t ret;
   provider_list_u32_t ok;
   provider_string_t err;
-  ret.is_err = !exports_cosmonic_llama_cpp_api_method_model_tokenize(((exports_cosmonic_llama_cpp_api_model_t*) arg), &arg3, arg2, &ok, &err);
+  ret.is_err = !exports_cosmonic_labs_llama_wit_api_method_model_tokenize(((exports_cosmonic_labs_llama_wit_api_model_t*) arg), &arg3, arg2, &ok, &err);
   if (ret.is_err) {
     ret.val.err = err;
   }
@@ -412,13 +412,13 @@ uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_model_tokenize(uin
   return ptr;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]model.detokenize")))
-uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_model_detokenize(uint8_t * arg, uint8_t * arg0, size_t arg1) {
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]model.detokenize")))
+uint8_t * __wasm_export_exports_cosmonic_labs_llama_wit_api_method_model_detokenize(uint8_t * arg, uint8_t * arg0, size_t arg1) {
   provider_list_u32_t arg2 = (provider_list_u32_t) { (uint32_t*)(arg0), (arg1) };
-  exports_cosmonic_llama_cpp_api_result_string_string_t ret;
+  exports_cosmonic_labs_llama_wit_api_result_string_string_t ret;
   provider_string_t ok;
   provider_string_t err;
-  ret.is_err = !exports_cosmonic_llama_cpp_api_method_model_detokenize(((exports_cosmonic_llama_cpp_api_model_t*) arg), &arg2, &ok, &err);
+  ret.is_err = !exports_cosmonic_labs_llama_wit_api_method_model_detokenize(((exports_cosmonic_labs_llama_wit_api_model_t*) arg), &arg2, &ok, &err);
   if (ret.is_err) {
     ret.val.err = err;
   }
@@ -438,19 +438,19 @@ uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_model_detokenize(u
   return ptr;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]model.is-eog")))
-int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_model_is_eog(uint8_t * arg, int32_t arg0) {
-  bool ret = exports_cosmonic_llama_cpp_api_method_model_is_eog(((exports_cosmonic_llama_cpp_api_model_t*) arg), (uint32_t) (arg0));
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]model.is-eog")))
+int32_t __wasm_export_exports_cosmonic_labs_llama_wit_api_method_model_is_eog(uint8_t * arg, int32_t arg0) {
+  bool ret = exports_cosmonic_labs_llama_wit_api_method_model_is_eog(((exports_cosmonic_labs_llama_wit_api_model_t*) arg), (uint32_t) (arg0));
   return ret;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]model.apply-chat-template")))
-uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_model_apply_chat_template(uint8_t * arg, uint8_t * arg0, size_t arg1, int32_t arg2) {
-  exports_cosmonic_llama_cpp_api_list_chat_message_t arg3 = (exports_cosmonic_llama_cpp_api_list_chat_message_t) { (exports_cosmonic_llama_cpp_api_chat_message_t*)(arg0), (arg1) };
-  exports_cosmonic_llama_cpp_api_result_string_string_t ret;
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]model.apply-chat-template")))
+uint8_t * __wasm_export_exports_cosmonic_labs_llama_wit_api_method_model_apply_chat_template(uint8_t * arg, uint8_t * arg0, size_t arg1, int32_t arg2) {
+  exports_cosmonic_labs_llama_wit_api_list_chat_message_t arg3 = (exports_cosmonic_labs_llama_wit_api_list_chat_message_t) { (exports_cosmonic_labs_llama_wit_api_chat_message_t*)(arg0), (arg1) };
+  exports_cosmonic_labs_llama_wit_api_result_string_string_t ret;
   provider_string_t ok;
   provider_string_t err;
-  ret.is_err = !exports_cosmonic_llama_cpp_api_method_model_apply_chat_template(((exports_cosmonic_llama_cpp_api_model_t*) arg), &arg3, arg2, &ok, &err);
+  ret.is_err = !exports_cosmonic_labs_llama_wit_api_method_model_apply_chat_template(((exports_cosmonic_labs_llama_wit_api_model_t*) arg), &arg3, arg2, &ok, &err);
   if (ret.is_err) {
     ret.val.err = err;
   }
@@ -470,25 +470,25 @@ uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_model_apply_chat_t
   return ptr;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]model.description")))
-uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_model_description(uint8_t * arg) {
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]model.description")))
+uint8_t * __wasm_export_exports_cosmonic_labs_llama_wit_api_method_model_description(uint8_t * arg) {
   provider_string_t ret;
-  exports_cosmonic_llama_cpp_api_method_model_description(((exports_cosmonic_llama_cpp_api_model_t*) arg), &ret);
+  exports_cosmonic_labs_llama_wit_api_method_model_description(((exports_cosmonic_labs_llama_wit_api_model_t*) arg), &ret);
   uint8_t *ptr = (uint8_t *) &RET_AREA;
   *((size_t*)(ptr + sizeof(void*))) = (ret).len;
   *((uint8_t **)(ptr + 0)) = (uint8_t *) (ret).ptr;
   return ptr;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]model.n-ctx-train")))
-int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_model_n_ctx_train(uint8_t * arg) {
-  uint32_t ret = exports_cosmonic_llama_cpp_api_method_model_n_ctx_train(((exports_cosmonic_llama_cpp_api_model_t*) arg));
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]model.n-ctx-train")))
+int32_t __wasm_export_exports_cosmonic_labs_llama_wit_api_method_model_n_ctx_train(uint8_t * arg) {
+  uint32_t ret = exports_cosmonic_labs_llama_wit_api_method_model_n_ctx_train(((exports_cosmonic_labs_llama_wit_api_model_t*) arg));
   return (int32_t) (ret);
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[constructor]context")))
-uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_constructor_context(int32_t arg, int32_t arg0, int32_t arg1, int32_t arg2) {
-  exports_cosmonic_llama_cpp_api_option_context_params_t option;
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[constructor]context")))
+uint8_t * __wasm_export_exports_cosmonic_labs_llama_wit_api_constructor_context(int32_t arg, int32_t arg0, int32_t arg1, int32_t arg2) {
+  exports_cosmonic_labs_llama_wit_api_option_context_params_t option;
   switch (arg0) {
     case 0: {
       option.is_some = false;
@@ -496,17 +496,17 @@ uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_constructor_context(int32
     }
     case 1: {
       option.is_some = true;
-      option.val = (exports_cosmonic_llama_cpp_api_context_params_t) {
+      option.val = (exports_cosmonic_labs_llama_wit_api_context_params_t) {
         (uint32_t) (uint32_t) (arg1),
         (uint32_t) (uint32_t) (arg2),
       };
       break;
     }
   }
-  exports_cosmonic_llama_cpp_api_result_own_context_string_t ret;
-  exports_cosmonic_llama_cpp_api_own_context_t ok;
+  exports_cosmonic_labs_llama_wit_api_result_own_context_string_t ret;
+  exports_cosmonic_labs_llama_wit_api_own_context_t ok;
   provider_string_t err;
-  ret.is_err = !exports_cosmonic_llama_cpp_api_constructor_context(((exports_cosmonic_llama_cpp_api_model_t*) arg), option.is_some ? &(option.val) : NULL, &ok, &err);
+  ret.is_err = !exports_cosmonic_labs_llama_wit_api_constructor_context(((exports_cosmonic_labs_llama_wit_api_model_t*) arg), option.is_some ? &(option.val) : NULL, &ok, &err);
   if (ret.is_err) {
     ret.val.err = err;
   }
@@ -519,18 +519,18 @@ uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_constructor_context(int32
     *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload3).len;
     *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload3).ptr;
   } else {
-    const exports_cosmonic_llama_cpp_api_own_context_t *payload = &(ret).val.ok;*((int8_t*)(ptr + 0)) = 0;
+    const exports_cosmonic_labs_llama_wit_api_own_context_t *payload = &(ret).val.ok;*((int8_t*)(ptr + 0)) = 0;
     *((int32_t*)(ptr + sizeof(void*))) = (*payload).__handle;
   }
   return ptr;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]context.append")))
-uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_context_append(uint8_t * arg, uint8_t * arg0, size_t arg1) {
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]context.append")))
+uint8_t * __wasm_export_exports_cosmonic_labs_llama_wit_api_method_context_append(uint8_t * arg, uint8_t * arg0, size_t arg1) {
   provider_string_t arg2 = (provider_string_t) { (uint8_t*)(arg0), (arg1) };
-  exports_cosmonic_llama_cpp_api_result_void_string_t ret;
+  exports_cosmonic_labs_llama_wit_api_result_void_string_t ret;
   provider_string_t err;
-  ret.is_err = !exports_cosmonic_llama_cpp_api_method_context_append(((exports_cosmonic_llama_cpp_api_context_t*) arg), &arg2, &err);
+  ret.is_err = !exports_cosmonic_labs_llama_wit_api_method_context_append(((exports_cosmonic_labs_llama_wit_api_context_t*) arg), &arg2, &err);
   if (ret.is_err) {
     ret.val.err = err;
   }
@@ -545,12 +545,12 @@ uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_context_append(uin
   return ptr;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]context.append-tokens")))
-uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_context_append_tokens(uint8_t * arg, uint8_t * arg0, size_t arg1) {
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]context.append-tokens")))
+uint8_t * __wasm_export_exports_cosmonic_labs_llama_wit_api_method_context_append_tokens(uint8_t * arg, uint8_t * arg0, size_t arg1) {
   provider_list_u32_t arg2 = (provider_list_u32_t) { (uint32_t*)(arg0), (arg1) };
-  exports_cosmonic_llama_cpp_api_result_void_string_t ret;
+  exports_cosmonic_labs_llama_wit_api_result_void_string_t ret;
   provider_string_t err;
-  ret.is_err = !exports_cosmonic_llama_cpp_api_method_context_append_tokens(((exports_cosmonic_llama_cpp_api_context_t*) arg), &arg2, &err);
+  ret.is_err = !exports_cosmonic_labs_llama_wit_api_method_context_append_tokens(((exports_cosmonic_labs_llama_wit_api_context_t*) arg), &arg2, &err);
   if (ret.is_err) {
     ret.val.err = err;
   }
@@ -565,20 +565,20 @@ uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_context_append_tok
   return ptr;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]context.n-past")))
-int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_n_past(uint8_t * arg) {
-  uint32_t ret = exports_cosmonic_llama_cpp_api_method_context_n_past(((exports_cosmonic_llama_cpp_api_context_t*) arg));
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]context.n-past")))
+int32_t __wasm_export_exports_cosmonic_labs_llama_wit_api_method_context_n_past(uint8_t * arg) {
+  uint32_t ret = exports_cosmonic_labs_llama_wit_api_method_context_n_past(((exports_cosmonic_labs_llama_wit_api_context_t*) arg));
   return (int32_t) (ret);
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]context.clear")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_clear(uint8_t * arg) {
-  exports_cosmonic_llama_cpp_api_method_context_clear(((exports_cosmonic_llama_cpp_api_context_t*) arg));
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]context.clear")))
+void __wasm_export_exports_cosmonic_labs_llama_wit_api_method_context_clear(uint8_t * arg) {
+  exports_cosmonic_labs_llama_wit_api_method_context_clear(((exports_cosmonic_labs_llama_wit_api_context_t*) arg));
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[constructor]sampler")))
-int32_t __wasm_export_exports_cosmonic_llama_cpp_api_constructor_sampler(int32_t arg, float arg0, int32_t arg1, float arg2, float arg3, int64_t arg4) {
-  exports_cosmonic_llama_cpp_api_option_sampler_params_t option;
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[constructor]sampler")))
+int32_t __wasm_export_exports_cosmonic_labs_llama_wit_api_constructor_sampler(int32_t arg, float arg0, int32_t arg1, float arg2, float arg3, int64_t arg4) {
+  exports_cosmonic_labs_llama_wit_api_option_sampler_params_t option;
   switch (arg) {
     case 0: {
       option.is_some = false;
@@ -586,7 +586,7 @@ int32_t __wasm_export_exports_cosmonic_llama_cpp_api_constructor_sampler(int32_t
     }
     case 1: {
       option.is_some = true;
-      option.val = (exports_cosmonic_llama_cpp_api_sampler_params_t) {
+      option.val = (exports_cosmonic_labs_llama_wit_api_sampler_params_t) {
         (float) arg0,
         (uint32_t) (uint32_t) (arg1),
         (float) arg2,
@@ -596,13 +596,13 @@ int32_t __wasm_export_exports_cosmonic_llama_cpp_api_constructor_sampler(int32_t
       break;
     }
   }
-  exports_cosmonic_llama_cpp_api_own_sampler_t ret = exports_cosmonic_llama_cpp_api_constructor_sampler(option.is_some ? &(option.val) : NULL);
+  exports_cosmonic_labs_llama_wit_api_own_sampler_t ret = exports_cosmonic_labs_llama_wit_api_constructor_sampler(option.is_some ? &(option.val) : NULL);
   return (ret).__handle;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api#[method]sampler.sample")))
-int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_sampler_sample(uint8_t * arg, int32_t arg0) {
-  uint32_t ret = exports_cosmonic_llama_cpp_api_method_sampler_sample(((exports_cosmonic_llama_cpp_api_sampler_t*) arg), ((exports_cosmonic_llama_cpp_api_context_t*) arg0));
+__attribute__((__export_name__("cosmonic-labs:llama-wit/api@0.1.0#[method]sampler.sample")))
+int32_t __wasm_export_exports_cosmonic_labs_llama_wit_api_method_sampler_sample(uint8_t * arg, int32_t arg0) {
+  uint32_t ret = exports_cosmonic_labs_llama_wit_api_method_sampler_sample(((exports_cosmonic_labs_llama_wit_api_sampler_t*) arg), ((exports_cosmonic_labs_llama_wit_api_context_t*) arg0));
   return (int32_t) (ret);
 }
 

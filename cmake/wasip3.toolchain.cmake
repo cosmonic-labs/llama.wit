@@ -28,7 +28,11 @@ set(_wasi_flags "-mthread-model single -msimd128 -D_WASI_EMULATED_SIGNAL")
 set(CMAKE_C_FLAGS_INIT   "${_wasi_flags}")
 set(CMAKE_CXX_FLAGS_INIT "${_wasi_flags} -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -include errno.h -include stdlib.h")
 # -ldl required for dlopen/dlsym/dlclose stubs
-set(_wasi_link "-fwasm-exceptions -lunwind -ldl")
+# stack-size: wasm-ld's default shadow stack is 64KiB, which llama.cpp (deep
+# C++ call chains, e.g. the webgpu backend's completion callbacks) overflows —
+# overflow traps as "index/memory access out of bounds" near address 0. Match
+# native llama.cpp's 8MiB thread stacks.
+set(_wasi_link "-fwasm-exceptions -lunwind -ldl -Wl,-z,stack-size=8388608")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "${_wasi_link}")
 
 # Skip FindThreads' probe (ggml calls find_package(Threads REQUIRED)): it references pthread_cancel/pthread_exit, which wasi-libc doesn't declare, so it won't compile.
