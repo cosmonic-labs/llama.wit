@@ -18,22 +18,22 @@ __attribute__((constructor(101)))
 static void wasip3_init_stack(void) { ensure_stack(); }
 
 // Short aliases for the (verbose) wit-bindgen resource-rep types.
-typedef exports_cosmonic_labs_llama_wit_api_model_t   model_t;
-typedef exports_cosmonic_labs_llama_wit_api_context_t context_t;
-typedef exports_cosmonic_labs_llama_wit_api_sampler_t sampler_t;
+typedef exports_cosmonic_llama_cpp_api_model_t   model_t;
+typedef exports_cosmonic_llama_cpp_api_context_t context_t;
+typedef exports_cosmonic_llama_cpp_api_sampler_t sampler_t;
 
 // The C header forward-declares these; we define the reps.
-struct exports_cosmonic_labs_llama_wit_api_model_t {
+struct exports_cosmonic_llama_cpp_api_model_t {
     struct llama_model *       model;
     const struct llama_vocab * vocab;
 };
-struct exports_cosmonic_labs_llama_wit_api_context_t {
+struct exports_cosmonic_llama_cpp_api_context_t {
     struct llama_context * ctx;
     const model_t *        model;    // borrowed; the model must outlive the context
     uint32_t               batch_size;
     uint32_t               past;
 };
-struct exports_cosmonic_labs_llama_wit_api_sampler_t {
+struct exports_cosmonic_llama_cpp_api_sampler_t {
     struct llama_sampler * smpl;
 };
 
@@ -49,10 +49,10 @@ static void log_cb(enum ggml_log_level level, const char * text, void * user) {
 
 // --- model ---
 
-bool exports_cosmonic_labs_llama_wit_api_constructor_model(
+bool exports_cosmonic_llama_cpp_api_constructor_model(
         provider_list_u8_t * data,
-        exports_cosmonic_labs_llama_wit_api_model_params_t * maybe_params,
-        exports_cosmonic_labs_llama_wit_api_own_model_t * ret,
+        exports_cosmonic_llama_cpp_api_model_params_t * maybe_params,
+        exports_cosmonic_llama_cpp_api_own_model_t * ret,
         provider_string_t * err) {
     // Route llama + ggml logging to a no-op sink so the provider never writes to
     // stderr (a WASI call). The statically-linked CPU backend registers itself, so
@@ -84,17 +84,17 @@ bool exports_cosmonic_labs_llama_wit_api_constructor_model(
     model_t * rep = (model_t *) malloc(sizeof(model_t));
     rep->model = m;
     rep->vocab = llama_model_get_vocab(m);
-    *ret = exports_cosmonic_labs_llama_wit_api_model_new(rep);
+    *ret = exports_cosmonic_llama_cpp_api_model_new(rep);
     return true;
 }
 
-void exports_cosmonic_labs_llama_wit_api_model_destructor(model_t * rep) {
+void exports_cosmonic_llama_cpp_api_model_destructor(model_t * rep) {
     ensure_stack();  // wasip3: resource-drop callbacks run with SP=0; set it first
     llama_model_free(rep->model);
     free(rep);
 }
 
-bool exports_cosmonic_labs_llama_wit_api_method_model_tokenize(
+bool exports_cosmonic_llama_cpp_api_method_model_tokenize(
         model_t * self, provider_string_t * text, bool add_special,
         provider_list_u32_t * ret, provider_string_t * err) {
     const char * t = (const char *) text->ptr;
@@ -111,7 +111,7 @@ bool exports_cosmonic_labs_llama_wit_api_method_model_tokenize(
     return true;
 }
 
-bool exports_cosmonic_labs_llama_wit_api_method_model_detokenize(
+bool exports_cosmonic_llama_cpp_api_method_model_detokenize(
         model_t * self, provider_list_u32_t * tokens,
         provider_string_t * ret, provider_string_t * err) {
     size_t cap = tokens->len * 8 + 16;
@@ -134,12 +134,12 @@ bool exports_cosmonic_labs_llama_wit_api_method_model_detokenize(
     return true;
 }
 
-bool exports_cosmonic_labs_llama_wit_api_method_model_is_eog(model_t * self, uint32_t token) {
+bool exports_cosmonic_llama_cpp_api_method_model_is_eog(model_t * self, uint32_t token) {
     return llama_vocab_is_eog(self->vocab, token);
 }
 
-bool exports_cosmonic_labs_llama_wit_api_method_model_apply_chat_template(
-        model_t * self, exports_cosmonic_labs_llama_wit_api_list_chat_message_t * messages,
+bool exports_cosmonic_llama_cpp_api_method_model_apply_chat_template(
+        model_t * self, exports_cosmonic_llama_cpp_api_list_chat_message_t * messages,
         bool add_assistant, provider_string_t * ret, provider_string_t * err) {
     const char * tmpl = llama_model_chat_template(self->model, NULL);
     if (!tmpl) {
@@ -188,7 +188,7 @@ bool exports_cosmonic_labs_llama_wit_api_method_model_apply_chat_template(
     return true;
 }
 
-void exports_cosmonic_labs_llama_wit_api_method_model_description(model_t * self, provider_string_t * ret) {
+void exports_cosmonic_llama_cpp_api_method_model_description(model_t * self, provider_string_t * ret) {
     ensure_stack();
     // Fail closed: an unwritten buf would otherwise be strlen'd by
     // provider_string_dup and hand the caller a slice of linear memory.
@@ -200,7 +200,7 @@ void exports_cosmonic_labs_llama_wit_api_method_model_description(model_t * self
     provider_string_dup(ret, buf);
 }
 
-uint32_t exports_cosmonic_labs_llama_wit_api_method_model_n_ctx_train(model_t * self) {
+uint32_t exports_cosmonic_llama_cpp_api_method_model_n_ctx_train(model_t * self) {
     return llama_model_n_ctx_train(self->model);
 }
 
@@ -220,9 +220,9 @@ static bool append_tokens(context_t * self, const uint32_t * toks, size_t count,
     return true;
 }
 
-bool exports_cosmonic_labs_llama_wit_api_constructor_context(
-        model_t * model, exports_cosmonic_labs_llama_wit_api_context_params_t * maybe_params,
-        exports_cosmonic_labs_llama_wit_api_own_context_t * ret, provider_string_t * err) {
+bool exports_cosmonic_llama_cpp_api_constructor_context(
+        model_t * model, exports_cosmonic_llama_cpp_api_context_params_t * maybe_params,
+        exports_cosmonic_llama_cpp_api_own_context_t * ret, provider_string_t * err) {
     struct llama_context_params cp = llama_context_default_params();
     // Treat 0 as "unset": the WIT records these as plain u32 (not option) but documents
     // per-field defaults, and n_batch == 0 would make append-tokens loop forever.
@@ -241,17 +241,17 @@ bool exports_cosmonic_labs_llama_wit_api_constructor_context(
     rep->model = model;
     rep->batch_size = cp.n_batch;
     rep->past = 0;
-    *ret = exports_cosmonic_labs_llama_wit_api_context_new(rep);
+    *ret = exports_cosmonic_llama_cpp_api_context_new(rep);
     return true;
 }
 
-void exports_cosmonic_labs_llama_wit_api_context_destructor(context_t * rep) {
+void exports_cosmonic_llama_cpp_api_context_destructor(context_t * rep) {
     ensure_stack();  // wasip3: resource-drop callbacks run with SP=0; set it first
     llama_free(rep->ctx);
     free(rep);
 }
 
-bool exports_cosmonic_labs_llama_wit_api_method_context_append(
+bool exports_cosmonic_llama_cpp_api_method_context_append(
         context_t * self, provider_string_t * text, provider_string_t * err) {
     const char * t = (const char *) text->ptr;
     int32_t len = (int32_t) text->len;
@@ -268,24 +268,24 @@ bool exports_cosmonic_labs_llama_wit_api_method_context_append(
     return ok;
 }
 
-bool exports_cosmonic_labs_llama_wit_api_method_context_append_tokens(
+bool exports_cosmonic_llama_cpp_api_method_context_append_tokens(
         context_t * self, provider_list_u32_t * tokens, provider_string_t * err) {
     return append_tokens(self, tokens->ptr, tokens->len, err);
 }
 
-uint32_t exports_cosmonic_labs_llama_wit_api_method_context_n_past(context_t * self) {
+uint32_t exports_cosmonic_llama_cpp_api_method_context_n_past(context_t * self) {
     return self->past;
 }
 
-void exports_cosmonic_labs_llama_wit_api_method_context_clear(context_t * self) {
+void exports_cosmonic_llama_cpp_api_method_context_clear(context_t * self) {
     llama_memory_clear(llama_get_memory(self->ctx), true);
     self->past = 0;
 }
 
 // --- sampler ---
 
-exports_cosmonic_labs_llama_wit_api_own_sampler_t exports_cosmonic_labs_llama_wit_api_constructor_sampler(
-        exports_cosmonic_labs_llama_wit_api_sampler_params_t * maybe_params) {
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_constructor_sampler(
+        exports_cosmonic_llama_cpp_api_sampler_params_t * maybe_params) {
     sampler_t * rep = (sampler_t *) malloc(sizeof(sampler_t));
     rep->smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
     if (!maybe_params || maybe_params->temp <= 0) {
@@ -297,16 +297,16 @@ exports_cosmonic_labs_llama_wit_api_own_sampler_t exports_cosmonic_labs_llama_wi
         llama_sampler_chain_add(rep->smpl, llama_sampler_init_temp(maybe_params->temp));
         llama_sampler_chain_add(rep->smpl, llama_sampler_init_dist(maybe_params->seed));
     }
-    return exports_cosmonic_labs_llama_wit_api_sampler_new(rep);
+    return exports_cosmonic_llama_cpp_api_sampler_new(rep);
 }
 
-void exports_cosmonic_labs_llama_wit_api_sampler_destructor(sampler_t * rep) {
+void exports_cosmonic_llama_cpp_api_sampler_destructor(sampler_t * rep) {
     ensure_stack();  // wasip3: resource-drop callbacks run with SP=0; set it first
     llama_sampler_free(rep->smpl);
     free(rep);
 }
 
-uint32_t exports_cosmonic_labs_llama_wit_api_method_sampler_sample(sampler_t * self, context_t * ctx) {
+uint32_t exports_cosmonic_llama_cpp_api_method_sampler_sample(sampler_t * self, context_t * ctx) {
     // No error channel (returns u32): an empty context has no logits at index -1,
     // so fail loudly instead of sampling garbage. Caller must append a prompt first.
     if (ctx->past == 0) {

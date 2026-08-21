@@ -1,4 +1,4 @@
-package cosmonic-labs:llama-wit@0.1.0;
+package cosmonic:llama-cpp@0.1.0;
 
 /// LLM inference over llama.cpp.
 ///
