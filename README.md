@@ -41,7 +41,7 @@ To build against local checkouts instead of fetching, point at them (this skips
 the fetch): `-DWASI_WEBGPU_HEADERS_DIR=/path/... -DDAWN_WASI_WEBGPU_DIR=/path/...`.
 Override the fetched refs with `-DWASI_WEBGPU_HEADERS_TAG=...` / `-DDAWN_WASI_WEBGPU_TAG=...`.
 
-The resulting `llama.wasm` additionally imports `wasi:webgpu/webgpu@0.3.0-rc.2`
+The resulting `llama-cpp.wasm` additionally imports `wasi:webgpu/webgpu@0.3.0-rc.2`
 (+ `wasi-gfx:surface`), which the host must provide. This path is unproven
 end-to-end on wasip3; expect to shake out linker/componentization issues (e.g.
 duplicate `cabi_realloc` across the two `component-type` objects). If the patch
@@ -53,12 +53,17 @@ ever fails to apply against a newer `LLAMA_GIT_TAG`, pin `-DLLAMA_GIT_TAG=b9886`
 cmake --build build --target regenerate-bindings
 ```
 
+CI regenerates the bindings with wit-bindgen 0.59.0 (`WIT_BINDGEN_VERSION` in
+[the workflow](.github/workflows/ci.yml)) and fails if they differ from what is committed,
+so regenerate with that version.
+
 ## Releases
 
-[CI](.github/workflows/ci.yml) builds the component on every push and pull request and
-checks that it exports the interface declared in `wit/`. The package version in
-[`wit/llama.wit`](wit/llama.wit) is the release version: a merge to `main` that bumps it
-publishes the component to GHCR with a signed build-provenance attestation.
+[CI](.github/workflows/ci.yml) builds the component on every pull request and push to `main`,
+and checks that the committed bindings match `wit/` and that the component exports the
+interface declared there. The package version in [`wit/llama.wit`](wit/llama.wit) is the
+release version: a merge to `main` that bumps it publishes the component to GHCR with a signed
+build-provenance attestation.
 
 To release, bump `package cosmonic:llama-cpp@<version>;`,
 [regenerate the bindings](#generate-bindings) and merge. Merges that leave the version alone

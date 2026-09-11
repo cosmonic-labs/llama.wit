@@ -1,3 +1,4 @@
 build:
-  command: cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasip3.toolchain.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build
+  # One job per core. A bare `--parallel` would let Make spawn unlimited jobs.
+  command: cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasip3.toolchain.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
   component_path: build/llama-cpp.wasm
