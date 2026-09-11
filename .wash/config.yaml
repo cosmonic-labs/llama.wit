@@ -1,0 +1,3 @@
+build:
+  command: cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasip3.toolchain.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build
+  component_path: build/llama-cpp.wasm

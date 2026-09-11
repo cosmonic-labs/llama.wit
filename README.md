@@ -9,11 +9,16 @@ export WASI_SDK_PATH=/path/to/wasi-sdk
 
 2. Compile
 ```shell
+wash build
+```
+
+This runs the CMake configure + build from [`.wash/config.yaml`](.wash/config.yaml), equivalent to:
+```shell
 cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasip3.toolchain.cmake -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-Output at `build/llama.wasm`
+Output at `build/llama-cpp.wasm`
 
 ## WebGPU backend (optional, experimental)
 
@@ -46,4 +51,20 @@ ever fails to apply against a newer `LLAMA_GIT_TAG`, pin `-DLLAMA_GIT_TAG=b9886`
 ## Generate Bindings
 ```shell
 cmake --build build --target regenerate-bindings
+```
+
+## Releases
+
+[CI](.github/workflows/ci.yml) builds the component on every push and pull request and
+checks that it exports the interface declared in `wit/`. The package version in
+[`wit/llama.wit`](wit/llama.wit) is the release version: a merge to `main` that bumps it
+publishes the component to GHCR with a signed build-provenance attestation.
+
+To release, bump `package cosmonic:llama-cpp@<version>;`,
+[regenerate the bindings](#generate-bindings) and merge. Merges that leave the version alone
+still build but publish nothing, and a published version is never overwritten.
+
+```shell
+wash oci pull ghcr.io/cosmonic-labs/llama.wit/llama-cpp:0.4.0 llama-cpp.wasm
+gh attestation verify oci://ghcr.io/cosmonic-labs/llama.wit/llama-cpp:0.4.0 --owner cosmonic-labs
 ```
