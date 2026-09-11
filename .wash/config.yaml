@@ -1,4 +1,5 @@
 build:
-  # One job per core. A bare `--parallel` would let Make spawn unlimited jobs.
-  command: cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasip3.toolchain.cmake -DCMAKE_BUILD_TYPE=Release && cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
+  # Builds the WebGPU variant, which is what CI publishes. One job per core: a
+  # bare `--parallel` would let Make spawn unlimited jobs.
+  command: cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasip3.toolchain.cmake -DCMAKE_BUILD_TYPE=Release -DLLAMA_WIT_WEBGPU=ON && cmake --build build --parallel "$(getconf _NPROCESSORS_ONLN)"
   component_path: build/llama-cpp.wasm

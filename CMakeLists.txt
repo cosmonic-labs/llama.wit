@@ -21,15 +21,19 @@ option(LLAMA_WIT_WEBGPU "Build with the wasi:webgpu GPU backend" OFF)
 
 # The webgpu glue is fetched from GitHub by default. Both repos commit their
 # generated bindings (imports*.c, imports_component_type.o, webgpu_cpp.h), so a
-# shallow clone is self-contained. To build against a local checkout instead,
-# point these at it (e.g. -DWASI_WEBGPU_HEADERS_DIR=/path/to/checkout) and the
-# matching fetch is skipped.
+# clone is self-contained. The refs are pinned to commits on each repo's
+# wasm-cg-demo branch so a build, and the component CI publishes, is
+# reproducible; bump them deliberately. A commit hash rules out a shallow clone
+# (GIT_SHALLOW only takes branch and tag names), but both repos are small.
+# To build against a local checkout instead, point these at it
+# (e.g. -DWASI_WEBGPU_HEADERS_DIR=/path/to/checkout) and the matching fetch is
+# skipped.
 set(WASI_WEBGPU_HEADERS_DIR "" CACHE PATH "Local wasi-webgpu-headers checkout (empty = fetch)")
 set(DAWN_WASI_WEBGPU_DIR    "" CACHE PATH "Local dawn_wasi_webgpu_cpp checkout (empty = fetch)")
 set(WASI_WEBGPU_HEADERS_REPOSITORY "https://github.com/MendyBerger/wasi-webgpu-headers.git" CACHE STRING "wasi-webgpu-headers git remote")
-set(WASI_WEBGPU_HEADERS_TAG        "wasm-cg-demo" CACHE STRING "wasi-webgpu-headers git ref")
+set(WASI_WEBGPU_HEADERS_TAG        "23625240f8c339e389f13f6266b4a4502df0a12e" CACHE STRING "wasi-webgpu-headers git ref")  # wasm-cg-demo, 2026-07-31
 set(DAWN_WASI_WEBGPU_REPOSITORY    "https://github.com/MendyBerger/dawn_wasi_webgpu_cpp.git" CACHE STRING "dawn_wasi_webgpu_cpp git remote")
-set(DAWN_WASI_WEBGPU_TAG           "wasm-cg-demo" CACHE STRING "dawn_wasi_webgpu_cpp git ref")
+set(DAWN_WASI_WEBGPU_TAG           "6de40d177289257ccadba792a5ba94a23b9c1bc7" CACHE STRING "dawn_wasi_webgpu_cpp git ref")  # wasm-cg-demo, 2026-08-02
 
 set(_llama_patch "")
 if(LLAMA_WIT_WEBGPU)
@@ -47,7 +51,6 @@ if(LLAMA_WIT_WEBGPU)
         FetchContent_Declare(wasi_webgpu_headers
             GIT_REPOSITORY ${WASI_WEBGPU_HEADERS_REPOSITORY}
             GIT_TAG        ${WASI_WEBGPU_HEADERS_TAG}
-            GIT_SHALLOW TRUE
             SOURCE_SUBDIR  _skip_configure_)
         FetchContent_MakeAvailable(wasi_webgpu_headers)
         set(WASI_WEBGPU_HEADERS_DIR ${wasi_webgpu_headers_SOURCE_DIR} CACHE PATH "" FORCE)
@@ -56,7 +59,6 @@ if(LLAMA_WIT_WEBGPU)
         FetchContent_Declare(dawn_wasi_webgpu_cpp
             GIT_REPOSITORY ${DAWN_WASI_WEBGPU_REPOSITORY}
             GIT_TAG        ${DAWN_WASI_WEBGPU_TAG}
-            GIT_SHALLOW TRUE
             SOURCE_SUBDIR  _skip_configure_)
         FetchContent_MakeAvailable(dawn_wasi_webgpu_cpp)
         set(DAWN_WASI_WEBGPU_DIR ${dawn_wasi_webgpu_cpp_SOURCE_DIR} CACHE PATH "" FORCE)
