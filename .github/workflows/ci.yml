@@ -55,8 +55,8 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
-          # `package cosmonic:llama-cpp@0.4.0;` -> version 0.4.0, and the interface
-          # the component has to export, cosmonic:llama-cpp/api@0.4.0.
+          # `package cosmonic:llama-cpp@0.5.0;` -> version 0.5.0, and the interface
+          # the component has to export, cosmonic:llama-cpp/api@0.5.0.
           decl=$(grep -m1 -oE '^package [a-z0-9-]+:[a-z0-9-]+@[^;]+' wit/llama.wit) \
             || { echo "::error::could not read the package declaration from wit/llama.wit"; exit 1; }
           decl=${decl#package }
