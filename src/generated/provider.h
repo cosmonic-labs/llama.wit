@@ -220,7 +220,7 @@ typedef struct {
   exports_cosmonic_llama_cpp_api_sampler_params_t val;
 } exports_cosmonic_llama_cpp_api_option_sampler_params_t;
 
-// Exported Functions from `cosmonic:llama-cpp/api@0.4.0`
+// Exported Functions from `cosmonic:llama-cpp/api@0.5.0`
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(provider_list_u8_t *data, exports_cosmonic_llama_cpp_api_model_params_t *maybe_params);
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create_callback(provider_event_t *event);
 bool exports_cosmonic_llama_cpp_api_method_model_tokenize(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_string_t *text, bool add_special, provider_list_u32_t *ret, provider_string_t *err);
