@@ -93,13 +93,13 @@ add_executable(provider
 )
 # Sources are C, but llama.cpp's static libs are C++ — link with the C++ driver so
 # the C++ runtime (libc++/libunwind) is pulled in.
-set_target_properties(provider PROPERTIES OUTPUT_NAME llama.wasm SUFFIX "" LINKER_LANGUAGE CXX)
+set_target_properties(provider PROPERTIES OUTPUT_NAME llama-cpp.wasm SUFFIX "" LINKER_LANGUAGE CXX)
 target_include_directories(provider PRIVATE src/generated)
 # library component, no main()
 target_link_options(provider PRIVATE -mexec-model=reactor)
 target_link_libraries(provider PRIVATE llama ggml ggml-cpu ggml-base)
 if(LLAMA_WIT_WEBGPU)
     # ggml-webgpu carries the wasi-webgpu-headers bindings + imports_component_type.o,
-    # which add the wasi:webgpu (+ wasi-gfx:surface) imports to the final component.
+    # which add the wasi:webgpu imports to the final component.
     target_link_libraries(provider PRIVATE ggml-webgpu)
 endif()

@@ -1,4 +1,4 @@
-package cosmonic:llama-cpp@0.1.0;
+package cosmonic:llama-cpp@0.4.0;
 
 /// LLM inference over llama.cpp.
 ///
@@ -59,7 +59,7 @@ interface api {
         /// file (or otherwise obtains the bytes) and passes them in, so the
         /// provider itself does no filesystem I/O. Fails with a message if the
         /// bytes are not a valid model.
-        constructor(data: list<u8>, params: option<model-params>) -> result<model, string>;
+        create: static async func(data: list<u8>, params: option<model-params>) -> result<model, string>;
 
         /// Convert text to tokens.
         ///
@@ -96,18 +96,18 @@ interface api {
     ///
     /// The model must outlive every context created from it.
     resource context {
-        constructor(model: borrow<model>, params: option<context-params>) -> result<context, string>;
+        create: static async func(model: borrow<model>, params: option<context-params>) -> result<context, string>;
 
         /// Tokenize `text` and feed it into the context (grows the KV cache),
         /// without generating. Start tokens are added automatically when the
         /// context is empty.
-        append: func(text: string) -> result<_, string>;
+        append: async func(text: string) -> result<_, string>;
 
         /// Same, for pre-tokenized input (see `model.tokenize`). Useful to
         /// control chunking: each call decodes at most `n-batch` tokens at a
         /// time, and callers can split work into several calls (e.g. to drive
         /// a progress indicator between them).
-        append-tokens: func(tokens: list<u32>) -> result<_, string>;
+        append-tokens: async func(tokens: list<u32>) -> result<_, string>;
 
         /// Number of tokens in the context so far (appended + generated).
         n-past: func() -> u32;
@@ -130,7 +130,7 @@ interface api {
         constructor(params: option<sampler-params>);
 
         /// Sample one token from the context's current logits.
-        sample: func(ctx: borrow<context>) -> u32;
+        sample: async func(ctx: borrow<context>) -> u32;
     }
 }
 

@@ -14,6 +14,73 @@ typedef struct provider_string_t {
   size_t len;
 } provider_string_t;
 
+// Async Helper Functions
+
+typedef uint32_t provider_subtask_status_t;
+typedef uint32_t provider_subtask_t;
+#define PROVIDER_SUBTASK_STATE(status) ((provider_subtask_state_t) ((status) & 0xf))
+#define PROVIDER_SUBTASK_HANDLE(status) ((provider_subtask_t) ((status) >> 4))
+
+typedef enum provider_subtask_state {
+  PROVIDER_SUBTASK_STARTING,
+  PROVIDER_SUBTASK_STARTED,
+  PROVIDER_SUBTASK_RETURNED,
+  PROVIDER_SUBTASK_STARTED_CANCELLED,
+  PROVIDER_SUBTASK_RETURNED_CANCELLED,
+} provider_subtask_state_t;
+
+provider_subtask_status_t provider_subtask_cancel(provider_subtask_t subtask);
+void provider_subtask_drop(provider_subtask_t subtask);
+
+typedef uint32_t provider_callback_code_t;
+#define PROVIDER_CALLBACK_CODE_EXIT 0
+#define PROVIDER_CALLBACK_CODE_YIELD 1
+#define PROVIDER_CALLBACK_CODE_WAIT(set) (2 | (set << 4))
+
+typedef enum provider_event_code {
+  PROVIDER_EVENT_NONE,
+  PROVIDER_EVENT_SUBTASK,
+  PROVIDER_EVENT_STREAM_READ,
+  PROVIDER_EVENT_STREAM_WRITE,
+  PROVIDER_EVENT_FUTURE_READ,
+  PROVIDER_EVENT_FUTURE_WRITE,
+  PROVIDER_EVENT_CANCEL,
+} provider_event_code_t;
+
+typedef struct provider_event {
+  provider_event_code_t event;
+  uint32_t waitable;
+  uint32_t code;
+} provider_event_t;
+
+typedef uint32_t provider_waitable_set_t;
+provider_waitable_set_t provider_waitable_set_new(void);
+void provider_waitable_join(uint32_t waitable, provider_waitable_set_t set);
+void provider_waitable_set_drop(provider_waitable_set_t set);
+void provider_waitable_set_wait(provider_waitable_set_t set, provider_event_t *event);
+void provider_waitable_set_poll(provider_waitable_set_t set, provider_event_t *event);
+
+void provider_task_cancel(void);
+
+typedef uint32_t provider_waitable_status_t;
+#define PROVIDER_WAITABLE_STATE(status) ((provider_waitable_state_t) ((status) & 0xf))
+#define PROVIDER_WAITABLE_COUNT(status) ((uint32_t) ((status) >> 4))
+#define PROVIDER_WAITABLE_STATUS_BLOCKED ((provider_waitable_status_t) -1)
+
+typedef enum provider_waitable_state {
+  PROVIDER_WAITABLE_COMPLETED,
+  PROVIDER_WAITABLE_DROPPED,
+  PROVIDER_WAITABLE_CANCELLED,
+} provider_waitable_state_t;
+
+void provider_backpressure_inc(void);
+void provider_backpressure_dec(void);
+void* provider_context_get_0(void);
+void provider_context_set_0(void* value);
+void provider_thread_yield(void);
+
+
+
 // Options for loading a model. Omitted params (`option::none`) use
 // llama.cpp defaults.
 typedef struct exports_cosmonic_llama_cpp_api_model_params_t {
@@ -153,21 +220,26 @@ typedef struct {
   exports_cosmonic_llama_cpp_api_sampler_params_t val;
 } exports_cosmonic_llama_cpp_api_option_sampler_params_t;
 
-// Exported Functions from `cosmonic:llama-cpp/api@0.1.0`
-bool exports_cosmonic_llama_cpp_api_constructor_model(provider_list_u8_t *data, exports_cosmonic_llama_cpp_api_model_params_t *maybe_params, exports_cosmonic_llama_cpp_api_own_model_t *ret, provider_string_t *err);
+// Exported Functions from `cosmonic:llama-cpp/api@0.4.0`
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(provider_list_u8_t *data, exports_cosmonic_llama_cpp_api_model_params_t *maybe_params);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create_callback(provider_event_t *event);
 bool exports_cosmonic_llama_cpp_api_method_model_tokenize(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_string_t *text, bool add_special, provider_list_u32_t *ret, provider_string_t *err);
 bool exports_cosmonic_llama_cpp_api_method_model_detokenize(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_list_u32_t *tokens, provider_string_t *ret, provider_string_t *err);
 bool exports_cosmonic_llama_cpp_api_method_model_is_eog(exports_cosmonic_llama_cpp_api_borrow_model_t self, uint32_t token);
 bool exports_cosmonic_llama_cpp_api_method_model_apply_chat_template(exports_cosmonic_llama_cpp_api_borrow_model_t self, exports_cosmonic_llama_cpp_api_list_chat_message_t *messages, bool add_assistant, provider_string_t *ret, provider_string_t *err);
 void exports_cosmonic_llama_cpp_api_method_model_description(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_string_t *ret);
 uint32_t exports_cosmonic_llama_cpp_api_method_model_n_ctx_train(exports_cosmonic_llama_cpp_api_borrow_model_t self);
-bool exports_cosmonic_llama_cpp_api_constructor_context(exports_cosmonic_llama_cpp_api_borrow_model_t model, exports_cosmonic_llama_cpp_api_context_params_t *maybe_params, exports_cosmonic_llama_cpp_api_own_context_t *ret, provider_string_t *err);
-bool exports_cosmonic_llama_cpp_api_method_context_append(exports_cosmonic_llama_cpp_api_borrow_context_t self, provider_string_t *text, provider_string_t *err);
-bool exports_cosmonic_llama_cpp_api_method_context_append_tokens(exports_cosmonic_llama_cpp_api_borrow_context_t self, provider_list_u32_t *tokens, provider_string_t *err);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_context_create(exports_cosmonic_llama_cpp_api_borrow_model_t model, exports_cosmonic_llama_cpp_api_context_params_t *maybe_params);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_context_create_callback(provider_event_t *event);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append(exports_cosmonic_llama_cpp_api_borrow_context_t self, provider_string_t *text);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_callback(provider_event_t *event);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_tokens(exports_cosmonic_llama_cpp_api_borrow_context_t self, provider_list_u32_t *tokens);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_tokens_callback(provider_event_t *event);
 uint32_t exports_cosmonic_llama_cpp_api_method_context_n_past(exports_cosmonic_llama_cpp_api_borrow_context_t self);
 void exports_cosmonic_llama_cpp_api_method_context_clear(exports_cosmonic_llama_cpp_api_borrow_context_t self);
 exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_constructor_sampler(exports_cosmonic_llama_cpp_api_sampler_params_t *maybe_params);
-uint32_t exports_cosmonic_llama_cpp_api_method_sampler_sample(exports_cosmonic_llama_cpp_api_borrow_sampler_t self, exports_cosmonic_llama_cpp_api_borrow_context_t ctx);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_sampler_sample(exports_cosmonic_llama_cpp_api_borrow_sampler_t self, exports_cosmonic_llama_cpp_api_borrow_context_t ctx);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_sampler_sample_callback(provider_event_t *event);
 
 // Helper Functions
 
@@ -212,6 +284,11 @@ void exports_cosmonic_llama_cpp_api_result_own_context_string_free(exports_cosmo
 void exports_cosmonic_llama_cpp_api_result_void_string_free(exports_cosmonic_llama_cpp_api_result_void_string_t *ptr);
 
 void exports_cosmonic_llama_cpp_api_option_sampler_params_free(exports_cosmonic_llama_cpp_api_option_sampler_params_t *ptr);
+void exports_cosmonic_llama_cpp_api_static_model_create_return(exports_cosmonic_llama_cpp_api_result_own_model_string_t ret);
+void exports_cosmonic_llama_cpp_api_static_context_create_return(exports_cosmonic_llama_cpp_api_result_own_context_string_t ret);
+void exports_cosmonic_llama_cpp_api_method_context_append_return(exports_cosmonic_llama_cpp_api_result_void_string_t ret);
+void exports_cosmonic_llama_cpp_api_method_context_append_tokens_return(exports_cosmonic_llama_cpp_api_result_void_string_t ret);
+void exports_cosmonic_llama_cpp_api_method_sampler_sample_return(uint32_t ret);
 
 // Sets the string `ret` to reference the input string `s` without copying it
 void provider_string_set(provider_string_t *ret, const char*s);
