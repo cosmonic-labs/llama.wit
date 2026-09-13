@@ -37,6 +37,7 @@ struct exports_cosmonic_llama_cpp_api_context_t {
     const model_t *        model;    // borrowed; the model must outlive the context
     uint32_t               batch_size;
     uint32_t               past;
+    bool                   embeddings;
 };
 struct exports_cosmonic_llama_cpp_api_sampler_t {
     struct llama_sampler * smpl;
@@ -350,6 +351,10 @@ uint32_t exports_cosmonic_llama_cpp_api_method_model_n_ctx_train(model_t * self)
     return llama_model_n_ctx_train(self->model);
 }
 
+uint32_t exports_cosmonic_llama_cpp_api_method_model_n_embd(model_t * self) {
+    return (uint32_t) llama_model_n_embd_out(self->model);
+}
+
 // --- context ---
 
 static bool append_tokens(context_t * self, const uint32_t * toks, size_t count, provider_string_t * err) {
@@ -389,6 +394,12 @@ static bool context_create(
     if (cp.n_batch > cp.n_ctx) {
         cp.n_batch = cp.n_ctx;
     }
+    bool embeddings = maybe_params && maybe_params->embeddings;
+    if (embeddings) {
+        // Encoder models cannot split an input across micro-batches.
+        cp.embeddings = true;
+        cp.n_ubatch = cp.n_batch;
+    }
     // WASI is single-threaded (pthread stubs); force ggml to compute on one thread.
     cp.n_threads       = 1;
     cp.n_threads_batch = 1;
@@ -402,6 +413,7 @@ static bool context_create(
     rep->model = model;
     rep->batch_size = cp.n_batch;
     rep->past = 0;
+    rep->embeddings = embeddings;
     *ret = exports_cosmonic_llama_cpp_api_context_new(rep);
     return true;
 }
@@ -462,6 +474,95 @@ provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_to
 }
 
 UNREACHABLE_CALLBACK(exports_cosmonic_llama_cpp_api_method_context_append_tokens_callback)
+
+static bool context_embed(
+        context_t * self, provider_list_u32_t * tokens,
+        provider_list_f32_t * ret, provider_string_t * err) {
+    if (!self->embeddings) {
+        set_err(err, "the context was not created with embeddings");
+        return false;
+    }
+    size_t n = tokens->len;
+    if (n == 0) {
+        set_err(err, "there are no tokens to embed");
+        return false;
+    }
+    if (!tokens_in_range(self->model, tokens->ptr, n)) {
+        set_err(err, "token out of range");
+        return false;
+    }
+    if (n > self->batch_size) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "input of %zu tokens does not fit in a batch of %u", n, self->batch_size);
+        set_err(err, msg);
+        return false;
+    }
+    if (llama_pooling_type(self->ctx) == LLAMA_POOLING_TYPE_RANK) {
+        set_err(err, "reranking models do not produce embeddings");
+        return false;
+    }
+
+    llama_memory_t memory = llama_get_memory(self->ctx);
+    if (memory) {
+        llama_memory_clear(memory, true);
+    }
+    self->past = 0;
+
+    struct llama_batch batch = llama_batch_init((int32_t) n, 0, 1);
+    for (size_t i = 0; i < n; i++) {
+        batch.token[i] = (llama_token) tokens->ptr[i];
+        batch.pos[i] = (llama_pos) i;
+        batch.n_seq_id[i] = 1;
+        batch.seq_id[i][0] = 0;
+        batch.logits[i] = true;
+    }
+    batch.n_tokens = (int32_t) n;
+    if (llama_decode(self->ctx, batch)) {
+        llama_batch_free(batch);
+        set_err(err, "decode failed");
+        return false;
+    }
+
+    size_t n_embd = (size_t) llama_model_n_embd_out(self->model->model);
+    float * out = (float *) calloc(n_embd, sizeof(float));
+    const float * pooled = llama_get_embeddings_seq(self->ctx, 0);
+    if (pooled) {
+        memcpy(out, pooled, n_embd * sizeof(float));
+    } else {
+        // Generative models have no pooling of their own: average the tokens.
+        for (size_t i = 0; i < n; i++) {
+            const float * token = llama_get_embeddings_ith(self->ctx, (int32_t) i);
+            if (!token) {
+                free(out);
+                llama_batch_free(batch);
+                set_err(err, "the model produced no token embeddings");
+                return false;
+            }
+            for (size_t j = 0; j < n_embd; j++) {
+                out[j] += token[j] / (float) n;
+            }
+        }
+    }
+    llama_batch_free(batch);
+    if (memory) {
+        llama_memory_clear(memory, true);
+    }
+
+    ret->ptr = out;
+    ret->len = n_embd;
+    return true;
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_embed(
+        context_t * self, provider_list_u32_t * tokens) {
+    exports_cosmonic_llama_cpp_api_result_list_f32_string_t ret;
+    ret.is_err = !context_embed(self, tokens, &ret.val.ok, &ret.val.err);
+    provider_list_u32_free(tokens);
+    exports_cosmonic_llama_cpp_api_method_context_embed_return(ret);
+    return PROVIDER_CALLBACK_CODE_EXIT;
+}
+
+UNREACHABLE_CALLBACK(exports_cosmonic_llama_cpp_api_method_context_embed_callback)
 
 uint32_t exports_cosmonic_llama_cpp_api_method_context_n_past(context_t * self) {
     return self->past;

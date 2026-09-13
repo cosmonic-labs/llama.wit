@@ -22,6 +22,9 @@ interface api {
         /// Max tokens processed per decode step; caps the chunk size used
         /// when feeding long prompts. Defaults to 512.
         n-batch: u32,
+        /// Create the context for `embed` rather than for generation. An
+        /// input to `embed` must then fit in one batch of `n-batch` tokens.
+        embeddings: bool,
     }
 
     /// Sampling configuration for `sampler`.
@@ -119,6 +122,9 @@ interface api {
 
         /// Context length the model was trained with.
         n-ctx-train: func() -> u32;
+
+        /// Length of the vectors `context.embed` returns.
+        n-embd: func() -> u32;
     }
 
     /// Inference state over a model: holds the KV cache, so text fed via
@@ -141,6 +147,12 @@ interface api {
         /// time, and callers can split work into several calls (e.g. to drive
         /// a progress indicator between them).
         append-tokens: async func(tokens: list<u32>) -> result<_, string>;
+
+        /// Embeds `tokens` as one sequence and returns its vector, which is not
+        /// normalized. Uses the model's pooling, or the mean of the token
+        /// embeddings for a model without one. Needs a context created with
+        /// `embeddings`; clears the context first.
+        embed: async func(tokens: list<u32>) -> result<list<f32>, string>;
 
         /// Number of tokens in the context so far (appended + generated).
         n-past: func() -> u32;
