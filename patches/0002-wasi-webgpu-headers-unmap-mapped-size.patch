@@ -1,0 +1,79 @@
+wasi-webgpu-headers: copy back only write mappings, and only what was mapped
+
+wgpuBufferUnmap copied the mapped range back with no size. The host then takes
+the rest of the buffer, so unmapping a mapping that covered only part of a
+buffer overran it and trapped. ggml-webgpu hits this whenever a readback is
+smaller than an earlier one, because it reuses one staging buffer: loading a
+model with a smaller vocabulary after a larger one trapped on the first token.
+
+A read mapping has nothing to write back, so skip the copy for it too.
+
+--- a/webgpu.c
++++ b/webgpu.c
+@@ -30,6 +30,8 @@
+     uint32_t refCount;
+     imports_list_u8_t* mapping;
+     uint64_t offset;
++    // Only a write mapping has changes to copy back on unmap.
++    bool mapped_for_write;
+ } WGPUBufferImpl;
+ typedef struct WGPUCommandBufferImpl {
+     wasi_webgpu_webgpu_own_gpu_command_buffer_t command_buffer;
+@@ -431,6 +433,7 @@
+     MapAsyncState* s = malloc(sizeof(MapAsyncState));
+     if (!s) oom();
+     s->cb = callbackInfo;
++    buffer->mapped_for_write = (mode & WGPUMapMode_Write) != 0;
+
+     wasi_webgpu_webgpu_method_gpu_buffer_map_async_args_t args = {
+         .self = wasi_webgpu_webgpu_borrow_gpu_buffer(buffer->buffer),
+@@ -455,23 +458,30 @@
+
+     // since we don't have memory mapping yet, we need to copy the mapped range back to the buffer before unmapping
+     if (buffer->mapping) {
+-        wasi_webgpu_webgpu_get_mapped_range_error_t err_set;
+-        bool success_set = wasi_webgpu_webgpu_method_gpu_buffer_get_mapped_range_set_with_copy(
+-            wasi_webgpu_webgpu_borrow_gpu_buffer(buffer->buffer),
+-            buffer->mapping,
+-            &buffer->offset,
+-            NULL, // copy in the whole mapped range
+-            &err_set
+-        );
++        // The size must be the length that was mapped: left unset, the host
++        // takes the rest of the buffer, which overruns a mapping that covered
++        // only part of it.
++        if (buffer->mapped_for_write) {
++            wasi_webgpu_webgpu_gpu_size64_t size_wasi = buffer->mapping->len;
++            wasi_webgpu_webgpu_get_mapped_range_error_t err_set;
++            bool success_set = wasi_webgpu_webgpu_method_gpu_buffer_get_mapped_range_set_with_copy(
++                wasi_webgpu_webgpu_borrow_gpu_buffer(buffer->buffer),
++                buffer->mapping,
++                &buffer->offset,
++                &size_wasi,
++                &err_set
++            );
+
+-        if (!success_set) {
+-            wasi_webgpu_webgpu_get_mapped_range_error_free(&err_set);
+-            todo();
++            if (!success_set) {
++                wasi_webgpu_webgpu_get_mapped_range_error_free(&err_set);
++                todo();
++            }
+         }
+
+         imports_list_u8_free(buffer->mapping);
+         buffer->mapping = NULL;
+     }
++    buffer->mapped_for_write = false;
+
+     wasi_webgpu_webgpu_unmap_error_t err_unmap;
+     bool success_unmap =
+@@ -935,6 +945,7 @@
+     buffer_struct->buffer = buffer;
+     buffer_struct->refCount = 1;
+     buffer_struct->mapping = NULL;
++    buffer_struct->mapped_for_write = descriptor && descriptor->mappedAtCreation;
+     return (WGPUBuffer)buffer_struct;
+ }
+
