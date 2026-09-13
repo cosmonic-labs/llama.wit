@@ -1,4 +1,4 @@
-package cosmonic:llama-cpp@0.5.0;
+package cosmonic:llama-cpp@0.6.0;
 
 /// LLM inference over llama.cpp.
 ///
@@ -26,10 +26,11 @@ interface api {
 
     /// Sampling configuration for `sampler`.
     ///
-    /// Samplers are applied as a chain (top-k, then top-p, then min-p, then
-    /// temperature) followed by a seeded random pick, matching llama.cpp's
-    /// conventions. `temp <= 0` selects greedy sampling and ignores every
-    /// other field.
+    /// Samplers are applied as a chain matching llama.cpp's conventions: logit
+    /// bias, then repetition penalties, then top-k, top-p, min-p and
+    /// temperature, followed by a seeded random pick. `temp <= 0` replaces
+    /// the truncation, temperature and random pick with a greedy pick; the
+    /// logit bias and penalties still apply.
     record sampler-params {
         /// Temperature. Higher = more random; `<= 0` = greedy (deterministic).
         temp: f32,
@@ -42,7 +43,27 @@ interface api {
         /// `0` disables.
         min-p: f32,
         /// Seed for the random pick, for reproducible sampling.
-        seed: u64,
+        /// `4294967295` picks a random seed.
+        seed: u32,
+        /// How many of the most recently sampled tokens the penalties look at.
+        /// `0` disables every penalty. The window is allocated up front, so
+        /// keep it within the context size.
+        penalty-last-n: u32,
+        /// Divides the logits of tokens already in the window. `1` disables.
+        repeat-penalty: f32,
+        /// Subtracted once per occurrence of a token in the window. `0`
+        /// disables.
+        frequency-penalty: f32,
+        /// Subtracted once from any token present in the window. `0` disables.
+        presence-penalty: f32,
+        /// Added to the logits of specific tokens before sampling. A large
+        /// negative bias bans a token.
+        logit-bias: list<logit-bias>,
+    }
+
+    record logit-bias {
+        token: u32,
+        bias: f32,
     }
 
     /// One turn of a conversation, for `model.apply-chat-template`.
@@ -68,7 +89,18 @@ interface api {
         tokenize: func(text: string, add-special: bool) -> result<list<u32>, string>;
 
         /// Convert tokens back to text.
+        ///
+        /// Bytes that are not valid UTF-8, such as a character cut off at
+        /// the end of `tokens`, come back as U+FFFD. To stream text a token at
+        /// a time, collect `token-to-piece` bytes instead.
         detokenize: func(tokens: list<u32>) -> result<string, string>;
+
+        /// The raw bytes one token stands for.
+        ///
+        /// A token may hold only part of a UTF-8 character, so the bytes are
+        /// not always valid text on their own. With `special`, control tokens
+        /// render as their text instead of as nothing.
+        token-to-piece: func(token: u32, special: bool) -> result<list<u8>, string>;
 
         /// Whether `token` ends generation (end-of-sequence, end-of-turn, ...).
         is-eog: func(token: u32) -> bool;
@@ -100,7 +132,8 @@ interface api {
 
         /// Tokenize `text` and feed it into the context (grows the KV cache),
         /// without generating. Start tokens are added automatically when the
-        /// context is empty.
+        /// context is empty. Input that would overflow the context window is
+        /// refused before any of it is decoded.
         append: async func(text: string) -> result<_, string>;
 
         /// Same, for pre-tokenized input (see `model.tokenize`). Useful to
@@ -121,13 +154,14 @@ interface api {
     ///
     ///   let tok = sampler.sample(ctx);        // pick from last logits
     ///   if model.is-eog(tok) { done }
-    ///   text += model.detokenize([tok]);
+    ///   bytes += model.token-to-piece(tok, false);
     ///   ctx.append-tokens([tok]);             // decode; makes next logits
     ///
     /// The context must be non-empty (append a prompt first).
     resource sampler {
-        /// `none` = greedy sampling.
-        constructor(params: option<sampler-params>);
+        /// `none` = greedy sampling. The model sizes the logit bias; the
+        /// sampler does not keep a reference to it.
+        constructor(model: borrow<model>, params: option<sampler-params>);
 
         /// Sample one token from the context's current logits.
         sample: async func(ctx: borrow<context>) -> u32;
