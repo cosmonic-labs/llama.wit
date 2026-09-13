@@ -29,9 +29,9 @@ interface api {
 
     /// Sampling configuration for `sampler`.
     ///
-    /// Samplers are applied as a chain matching llama.cpp's conventions: logit
-    /// bias, then repetition penalties, then top-k, top-p, min-p and
-    /// temperature, followed by a seeded random pick. `temp <= 0` replaces
+    /// Samplers are applied as a chain matching llama.cpp's conventions: the
+    /// grammar, logit bias, then repetition penalties, then top-k, top-p, min-p
+    /// and temperature, followed by a seeded random pick. `temp <= 0` replaces
     /// the truncation, temperature and random pick with a greedy pick; the
     /// logit bias and penalties still apply.
     record sampler-params {
@@ -62,6 +62,10 @@ interface api {
         /// Added to the logits of specific tokens before sampling. A large
         /// negative bias bans a token.
         logit-bias: list<logit-bias>,
+        /// A GBNF grammar, with a `root` rule, that the output must match.
+        /// End of generation is only sampled once the grammar is complete.
+        /// `json-schema-to-grammar` makes one from a JSON Schema.
+        grammar: option<string>,
     }
 
     record logit-bias {
@@ -171,13 +175,19 @@ interface api {
     ///
     /// The context must be non-empty (append a prompt first).
     resource sampler {
-        /// `none` = greedy sampling. The model sizes the logit bias; the
-        /// sampler does not keep a reference to it.
-        constructor(model: borrow<model>, params: option<sampler-params>);
+        /// `none` = greedy sampling. The model sizes the logit bias and
+        /// compiles the grammar; the sampler does not keep a reference to it.
+        /// Fails if the grammar does not parse.
+        create: static func(model: borrow<model>, params: option<sampler-params>) -> result<sampler, string>;
 
         /// Sample one token from the context's current logits.
         sample: async func(ctx: borrow<context>) -> u32;
     }
+
+    /// Converts a JSON Schema to a GBNF grammar for `sampler-params.grammar`,
+    /// with llama.cpp's own converter. Fails if the schema is not valid JSON
+    /// or uses something the converter does not support.
+    json-schema-to-grammar: func(schema: string) -> result<string, string>;
 }
 
 /// Implemented by the llama-cpp-wit component.

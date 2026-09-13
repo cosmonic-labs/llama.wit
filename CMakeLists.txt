@@ -104,13 +104,20 @@ add_custom_target(regenerate-bindings
 
 add_executable(provider
     src/inference.c
+    src/grammar.cpp
     src/generated/provider.c
     src/generated/provider_component_type.o
+    # llama.cpp's JSON Schema to GBNF converter. The rest of its common library is
+    # not built; src/grammar.cpp supplies the few helpers the converter needs.
+    ${llama_SOURCE_DIR}/common/json-schema-to-grammar.cpp
 )
 # Sources are C, but llama.cpp's static libs are C++ — link with the C++ driver so
 # the C++ runtime (libc++/libunwind) is pulled in.
 set_target_properties(provider PROPERTIES OUTPUT_NAME llama-cpp.wasm SUFFIX "" LINKER_LANGUAGE CXX)
-target_include_directories(provider PRIVATE src/generated)
+target_include_directories(provider PRIVATE
+    src/generated
+    ${llama_SOURCE_DIR}/common
+    ${llama_SOURCE_DIR}/vendor)
 # library component, no main()
 target_link_options(provider PRIVATE -mexec-model=reactor)
 target_link_libraries(provider PRIVATE llama ggml ggml-cpu ggml-base)

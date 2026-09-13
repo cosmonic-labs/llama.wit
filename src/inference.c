@@ -595,34 +595,84 @@ static void sampler_add_logit_bias(
     free(valid);
 }
 
-exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_constructor_sampler(
-        exports_cosmonic_llama_cpp_api_borrow_model_t model,
-        exports_cosmonic_llama_cpp_api_sampler_params_t * maybe_params) {
-    sampler_t * rep = (sampler_t *) malloc(sizeof(sampler_t));
-    rep->smpl = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    const exports_cosmonic_llama_cpp_api_sampler_params_t * p = maybe_params;
+static bool sampler_create(
+        model_t * model, exports_cosmonic_llama_cpp_api_sampler_params_t * p,
+        exports_cosmonic_llama_cpp_api_own_sampler_t * ret, provider_string_t * err) {
+    struct llama_sampler * chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
     if (!p) {
-        llama_sampler_chain_add(rep->smpl, llama_sampler_init_greedy());
-        return exports_cosmonic_llama_cpp_api_sampler_new(rep);
+        llama_sampler_chain_add(chain, llama_sampler_init_greedy());
+        sampler_t * rep = (sampler_t *) malloc(sizeof(sampler_t));
+        rep->smpl = chain;
+        *ret = exports_cosmonic_llama_cpp_api_sampler_new(rep);
+        return true;
+    }
+
+    // First, so no token the grammar forbids survives into the rest of the chain.
+    if (p->grammar.is_some) {
+        char * grammar = (char *) malloc(p->grammar.val.len + 1);
+        memcpy(grammar, p->grammar.val.ptr, p->grammar.val.len);
+        grammar[p->grammar.val.len] = '\0';
+        struct llama_sampler * constrained = llama_sampler_init_grammar(model->vocab, grammar, "root");
+        free(grammar);
+        if (!constrained) {
+            llama_sampler_free(chain);
+            set_err(err, "the grammar does not parse");
+            return false;
+        }
+        llama_sampler_chain_add(chain, constrained);
     }
 
     // Same order as llama.cpp's common sampler: bias and penalties shape the
     // logits before anything truncates or picks.
-    sampler_add_logit_bias(rep->smpl, model, &p->logit_bias);
+    sampler_add_logit_bias(chain, model, &p->logit_bias);
     int32_t last_n = p->penalty_last_n > INT32_MAX ? INT32_MAX : (int32_t) p->penalty_last_n;
-    llama_sampler_chain_add(rep->smpl, llama_sampler_init_penalties(
+    llama_sampler_chain_add(chain, llama_sampler_init_penalties(
         last_n, p->repeat_penalty, p->frequency_penalty, p->presence_penalty));
     if (p->temp <= 0) {
-        llama_sampler_chain_add(rep->smpl, llama_sampler_init_greedy());
+        llama_sampler_chain_add(chain, llama_sampler_init_greedy());
     } else {
-        if (p->top_k > 0) { llama_sampler_chain_add(rep->smpl, llama_sampler_init_top_k(p->top_k)); }
-        if (p->top_p < 1) { llama_sampler_chain_add(rep->smpl, llama_sampler_init_top_p(p->top_p, 1)); }
-        if (p->min_p > 0) { llama_sampler_chain_add(rep->smpl, llama_sampler_init_min_p(p->min_p, 1)); }
-        llama_sampler_chain_add(rep->smpl, llama_sampler_init_temp(p->temp));
-        llama_sampler_chain_add(rep->smpl, llama_sampler_init_dist(p->seed));
+        if (p->top_k > 0) { llama_sampler_chain_add(chain, llama_sampler_init_top_k(p->top_k)); }
+        if (p->top_p < 1) { llama_sampler_chain_add(chain, llama_sampler_init_top_p(p->top_p, 1)); }
+        if (p->min_p > 0) { llama_sampler_chain_add(chain, llama_sampler_init_min_p(p->min_p, 1)); }
+        llama_sampler_chain_add(chain, llama_sampler_init_temp(p->temp));
+        llama_sampler_chain_add(chain, llama_sampler_init_dist(p->seed));
     }
-    exports_cosmonic_llama_cpp_api_sampler_params_free(maybe_params);
-    return exports_cosmonic_llama_cpp_api_sampler_new(rep);
+    sampler_t * rep = (sampler_t *) malloc(sizeof(sampler_t));
+    rep->smpl = chain;
+    *ret = exports_cosmonic_llama_cpp_api_sampler_new(rep);
+    return true;
+}
+
+bool exports_cosmonic_llama_cpp_api_static_sampler_create(
+        exports_cosmonic_llama_cpp_api_borrow_model_t model,
+        exports_cosmonic_llama_cpp_api_sampler_params_t * maybe_params,
+        exports_cosmonic_llama_cpp_api_own_sampler_t * ret, provider_string_t * err) {
+    ensure_stack();
+    bool ok = sampler_create(model, maybe_params, ret, err);
+    if (maybe_params) {
+        exports_cosmonic_llama_cpp_api_sampler_params_free(maybe_params);
+    }
+    return ok;
+}
+
+// Defined in grammar.cpp.
+bool llama_wit_json_schema_to_grammar(const char * schema, size_t len, char ** out, char ** err);
+
+bool exports_cosmonic_llama_cpp_api_json_schema_to_grammar(
+        provider_string_t * schema, provider_string_t * ret, provider_string_t * err) {
+    ensure_stack();
+    char * grammar = NULL;
+    char * message = NULL;
+    bool ok = llama_wit_json_schema_to_grammar((const char *) schema->ptr, schema->len, &grammar, &message);
+    if (ok) {
+        provider_string_dup(ret, grammar);
+        free(grammar);
+    } else {
+        provider_string_dup(err, message ? message : "the schema could not be converted");
+        free(message);
+    }
+    provider_string_free(schema);
+    return ok;
 }
 
 void exports_cosmonic_llama_cpp_api_sampler_destructor(sampler_t * rep) {

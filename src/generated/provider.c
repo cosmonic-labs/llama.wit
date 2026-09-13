@@ -106,7 +106,39 @@ void __wasm_export_exports_cosmonic_llama_cpp_api_method_model_description_post_
 
 
 
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api@0.6.0#[static]sampler.create")))
+void __wasm_export_exports_cosmonic_llama_cpp_api_static_sampler_create_post_return(uint8_t * arg0) {
+  switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
+    case 0: {
+      break;
+    }
+    case 1: {
+      if ((*((size_t*) (arg0 + (2*sizeof(void*))))) > 0) {
+        free(*((uint8_t **) (arg0 + sizeof(void*))));
+      }
+      break;
+    }
+  }
+}
 
+
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api@0.6.0#json-schema-to-grammar")))
+void __wasm_export_exports_cosmonic_llama_cpp_api_json_schema_to_grammar_post_return(uint8_t * arg0) {
+  switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
+    case 0: {
+      if ((*((size_t*) (arg0 + (2*sizeof(void*))))) > 0) {
+        free(*((uint8_t **) (arg0 + sizeof(void*))));
+      }
+      break;
+    }
+    case 1: {
+      if ((*((size_t*) (arg0 + (2*sizeof(void*))))) > 0) {
+        free(*((uint8_t **) (arg0 + sizeof(void*))));
+      }
+      break;
+    }
+  }
+}
 
 // Canonical ABI intrinsics
 
@@ -134,8 +166,15 @@ void exports_cosmonic_llama_cpp_api_list_logit_bias_free(exports_cosmonic_llama_
   }
 }
 
+void provider_option_string_free(provider_option_string_t *ptr) {
+  if (ptr->is_some) {
+    provider_string_free(&ptr->val);
+  }
+}
+
 void exports_cosmonic_llama_cpp_api_sampler_params_free(exports_cosmonic_llama_cpp_api_sampler_params_t *ptr) {
   exports_cosmonic_llama_cpp_api_list_logit_bias_free(&ptr->logit_bias);
+  provider_option_string_free(&ptr->grammar);
 }
 
 void exports_cosmonic_llama_cpp_api_chat_message_free(exports_cosmonic_llama_cpp_api_chat_message_t *ptr) {
@@ -328,6 +367,13 @@ void exports_cosmonic_llama_cpp_api_result_list_f32_string_free(exports_cosmonic
 void exports_cosmonic_llama_cpp_api_option_sampler_params_free(exports_cosmonic_llama_cpp_api_option_sampler_params_t *ptr) {
   if (ptr->is_some) {
     exports_cosmonic_llama_cpp_api_sampler_params_free(&ptr->val);
+  }
+}
+
+void exports_cosmonic_llama_cpp_api_result_own_sampler_string_free(exports_cosmonic_llama_cpp_api_result_own_sampler_string_t *ptr) {
+  if (!ptr->is_err) {
+  } else {
+    provider_string_free(&ptr->val.err);
   }
 }
 
@@ -827,17 +873,30 @@ void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_clear(uint8_t *
   exports_cosmonic_llama_cpp_api_method_context_clear(((exports_cosmonic_llama_cpp_api_context_t*) arg));
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api@0.6.0#[constructor]sampler")))
-int32_t __wasm_export_exports_cosmonic_llama_cpp_api_constructor_sampler(int32_t arg, int32_t arg0, float arg1, int32_t arg2, float arg3, float arg4, int32_t arg5, int32_t arg6, float arg7, float arg8, float arg9, uint8_t * arg10, size_t arg11) {
-  exports_cosmonic_llama_cpp_api_option_sampler_params_t option;
+__attribute__((__export_name__("cosmonic:llama-cpp/api@0.6.0#[static]sampler.create")))
+uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_static_sampler_create(int32_t arg, int32_t arg0, float arg1, int32_t arg2, float arg3, float arg4, int32_t arg5, int32_t arg6, float arg7, float arg8, float arg9, uint8_t * arg10, size_t arg11, int32_t arg12, uint8_t * arg13, size_t arg14) {
+  exports_cosmonic_llama_cpp_api_option_sampler_params_t option15;
   switch (arg0) {
     case 0: {
-      option.is_some = false;
+      option15.is_some = false;
       break;
     }
     case 1: {
-      option.is_some = true;
-      option.val = (exports_cosmonic_llama_cpp_api_sampler_params_t) {
+      option15.is_some = true;
+      provider_option_string_t option;
+      switch (arg12) {
+        case 0: {
+          option.is_some = false;
+          break;
+        }
+        case 1: {
+          option.is_some = true;
+          option.val = (provider_string_t) { (uint8_t*)(arg13), (arg14) };
+          break;
+        }
+      }
+
+      option15.val = (exports_cosmonic_llama_cpp_api_sampler_params_t) {
         (float) arg1,
         (uint32_t) (uint32_t) (arg2),
         (float) arg3,
@@ -848,18 +907,63 @@ int32_t __wasm_export_exports_cosmonic_llama_cpp_api_constructor_sampler(int32_t
         (float) arg8,
         (float) arg9,
         (exports_cosmonic_llama_cpp_api_list_logit_bias_t) (exports_cosmonic_llama_cpp_api_list_logit_bias_t) { (exports_cosmonic_llama_cpp_api_logit_bias_t*)(arg10), (arg11) },
+        (provider_option_string_t) option,
       };
       break;
     }
   }
-  exports_cosmonic_llama_cpp_api_own_sampler_t ret = exports_cosmonic_llama_cpp_api_constructor_sampler(((exports_cosmonic_llama_cpp_api_model_t*) arg), option.is_some ? &(option.val) : NULL);
-  return (ret).__handle;
+  exports_cosmonic_llama_cpp_api_result_own_sampler_string_t ret;
+  exports_cosmonic_llama_cpp_api_own_sampler_t ok;
+  provider_string_t err;
+  ret.is_err = !exports_cosmonic_llama_cpp_api_static_sampler_create(((exports_cosmonic_llama_cpp_api_model_t*) arg), option15.is_some ? &(option15.val) : NULL, &ok, &err);
+  if (ret.is_err) {
+    ret.val.err = err;
+  }
+  if (!ret.is_err) {
+    ret.val.ok = ok;
+  }
+  uint8_t *ptr = (uint8_t *) &RET_AREA;
+  if ((ret).is_err) {
+    const provider_string_t *payload16 = &(ret).val.err;*((int8_t*)(ptr + 0)) = 1;
+    *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload16).len;
+    *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload16).ptr;
+  } else {
+    const exports_cosmonic_llama_cpp_api_own_sampler_t *payload = &(ret).val.ok;*((int8_t*)(ptr + 0)) = 0;
+    *((int32_t*)(ptr + sizeof(void*))) = (*payload).__handle;
+  }
+  return ptr;
 }
 
 __attribute__((__export_name__("[async-lift]cosmonic:llama-cpp/api@0.6.0#[method]sampler.sample")))
 int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_sampler_sample(uint8_t * arg, int32_t arg0) {
   provider_callback_code_t ret = exports_cosmonic_llama_cpp_api_method_sampler_sample(((exports_cosmonic_llama_cpp_api_sampler_t*) arg), ((exports_cosmonic_llama_cpp_api_context_t*) arg0));
   return ret;
+}
+
+__attribute__((__export_name__("cosmonic:llama-cpp/api@0.6.0#json-schema-to-grammar")))
+uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_json_schema_to_grammar(uint8_t * arg, size_t arg0) {
+  provider_string_t arg1 = (provider_string_t) { (uint8_t*)(arg), (arg0) };
+  exports_cosmonic_llama_cpp_api_result_string_string_t ret;
+  provider_string_t ok;
+  provider_string_t err;
+  ret.is_err = !exports_cosmonic_llama_cpp_api_json_schema_to_grammar(&arg1, &ok, &err);
+  if (ret.is_err) {
+    ret.val.err = err;
+  }
+  if (!ret.is_err) {
+    ret.val.ok = ok;
+  }
+  uint8_t *ptr = (uint8_t *) &RET_AREA;
+  if ((ret).is_err) {
+    const provider_string_t *payload2 = &(ret).val.err;*((int8_t*)(ptr + 0)) = 1;
+    *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload2).len;
+    *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload2).ptr;
+  } else {
+    const provider_string_t *payload = &(ret).val.ok;*((int8_t*)(ptr + 0)) = 0;
+    *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload).len;
+    *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload).ptr;
+  }
+  return ptr;
 }
 
 // Ensure that the *_component_type.o object is linked in
