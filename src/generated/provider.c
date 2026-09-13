@@ -106,6 +106,21 @@ void __wasm_export_exports_cosmonic_llama_cpp_api_method_model_description_post_
 
 
 
+__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api@0.6.0#[method]context.truncate")))
+void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_truncate_post_return(uint8_t * arg0) {
+  switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
+    case 0: {
+      break;
+    }
+    case 1: {
+      if ((*((size_t*) (arg0 + (2*sizeof(void*))))) > 0) {
+        free(*((uint8_t **) (arg0 + sizeof(void*))));
+      }
+      break;
+    }
+  }
+}
+
 __attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api@0.6.0#[static]sampler.create")))
 void __wasm_export_exports_cosmonic_llama_cpp_api_static_sampler_create_post_return(uint8_t * arg0) {
   switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
@@ -871,6 +886,25 @@ int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_n_past(uint8
 __attribute__((__export_name__("cosmonic:llama-cpp/api@0.6.0#[method]context.clear")))
 void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_clear(uint8_t * arg) {
   exports_cosmonic_llama_cpp_api_method_context_clear(((exports_cosmonic_llama_cpp_api_context_t*) arg));
+}
+
+__attribute__((__export_name__("cosmonic:llama-cpp/api@0.6.0#[method]context.truncate")))
+uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_context_truncate(uint8_t * arg, int32_t arg0) {
+  exports_cosmonic_llama_cpp_api_result_void_string_t ret;
+  provider_string_t err;
+  ret.is_err = !exports_cosmonic_llama_cpp_api_method_context_truncate(((exports_cosmonic_llama_cpp_api_context_t*) arg), (uint32_t) (arg0), &err);
+  if (ret.is_err) {
+    ret.val.err = err;
+  }
+  uint8_t *ptr = (uint8_t *) &RET_AREA;
+  if ((ret).is_err) {
+    const provider_string_t *payload1 = &(ret).val.err;*((int8_t*)(ptr + 0)) = 1;
+    *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload1).len;
+    *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload1).ptr;
+  } else {
+    *((int8_t*)(ptr + 0)) = 0;
+  }
+  return ptr;
 }
 
 __attribute__((__export_name__("cosmonic:llama-cpp/api@0.6.0#[static]sampler.create")))

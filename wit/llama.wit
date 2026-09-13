@@ -163,6 +163,17 @@ interface api {
 
         /// Reset to an empty context (clears the KV cache).
         clear: func();
+
+        /// Keeps the first `n` tokens and forgets the rest, so a prompt that
+        /// shares a prefix with what the context holds only has to append the
+        /// part that differs. Append at least one token before sampling again.
+        ///
+        /// Fails, leaving the context empty, when `n` is more than the context
+        /// holds or the model's memory cannot give back the prefix: recurrent
+        /// models cannot forget tokens from the end, and sliding-window
+        /// attention may already have dropped tokens the prefix needs. Append
+        /// the whole prompt then.
+        truncate: func(n: u32) -> result<_, string>;
     }
 
     /// A sampler chain (mirrors `llama_sampler_chain`). Generation is a

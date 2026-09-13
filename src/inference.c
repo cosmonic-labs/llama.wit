@@ -573,6 +573,42 @@ void exports_cosmonic_llama_cpp_api_method_context_clear(context_t * self) {
     self->past = 0;
 }
 
+static bool context_truncate(context_t * self, uint32_t n, provider_string_t * err) {
+    if (n == self->past) {
+        return true;
+    }
+    llama_memory_t memory = llama_get_memory(self->ctx);
+    if (n > self->past) {
+        set_err(err, "the context holds fewer tokens than that");
+    } else if (n == 0) {
+        llama_memory_clear(memory, true);
+        self->past = 0;
+        return true;
+    } else {
+        // With sliding-window attention the cache drops old positions, and the
+        // token after the prefix attends to the n_swa before it.
+        int32_t oldest_needed = (int32_t) n - llama_model_n_swa(self->model->model);
+        llama_pos pos_min = llama_memory_seq_pos_min(memory, 0);
+        if (pos_min < 0 || pos_min > (oldest_needed > 0 ? oldest_needed : 0)) {
+            set_err(err, "the context no longer holds the tokens before that point");
+        } else if (!llama_memory_seq_rm(memory, 0, (llama_pos) n, -1)) {
+            set_err(err, "the model cannot forget tokens from the end of the context");
+        } else {
+            self->past = n;
+            return true;
+        }
+    }
+    llama_memory_clear(memory, true);
+    self->past = 0;
+    return false;
+}
+
+bool exports_cosmonic_llama_cpp_api_method_context_truncate(
+        context_t * self, uint32_t n, provider_string_t * err) {
+    ensure_stack();
+    return context_truncate(self, n, err);
+}
+
 // --- sampler ---
 
 static void sampler_add_logit_bias(
