@@ -55,6 +55,20 @@ if(LLAMA_WIT_WEBGPU)
         FetchContent_MakeAvailable(wasi_webgpu_headers)
         set(WASI_WEBGPU_HEADERS_DIR ${wasi_webgpu_headers_SOURCE_DIR} CACHE PATH "" FORCE)
     endif()
+    # Patch the glue idempotently, at configure time because the fetch above is
+    # skipped once WASI_WEBGPU_HEADERS_DIR is cached. Only a copy fetched into this
+    # build is patched; a local checkout passed in is left alone.
+    set(_headers_patch ${CMAKE_CURRENT_SOURCE_DIR}/patches/0002-wasi-webgpu-headers-unmap-mapped-size.patch)
+    cmake_path(IS_PREFIX CMAKE_BINARY_DIR "${WASI_WEBGPU_HEADERS_DIR}" _headers_fetched)
+    if(_headers_fetched)
+        execute_process(
+            COMMAND sh -c "git apply --reverse --check '${_headers_patch}' 2>/dev/null || patch -p1 --forward --fuzz=3 < '${_headers_patch}'"
+            WORKING_DIRECTORY ${WASI_WEBGPU_HEADERS_DIR}
+            RESULT_VARIABLE _headers_patch_result)
+        if(NOT _headers_patch_result EQUAL 0)
+            message(FATAL_ERROR "failed to apply ${_headers_patch}")
+        endif()
+    endif()
     if(NOT DAWN_WASI_WEBGPU_DIR)
         FetchContent_Declare(dawn_wasi_webgpu_cpp
             GIT_REPOSITORY ${DAWN_WASI_WEBGPU_REPOSITORY}
@@ -90,13 +104,20 @@ add_custom_target(regenerate-bindings
 
 add_executable(provider
     src/inference.c
+    src/grammar.cpp
     src/generated/provider.c
     src/generated/provider_component_type.o
+    # llama.cpp's JSON Schema to GBNF converter. The rest of its common library is
+    # not built; src/grammar.cpp supplies the few helpers the converter needs.
+    ${llama_SOURCE_DIR}/common/json-schema-to-grammar.cpp
 )
 # Sources are C, but llama.cpp's static libs are C++ — link with the C++ driver so
 # the C++ runtime (libc++/libunwind) is pulled in.
 set_target_properties(provider PROPERTIES OUTPUT_NAME llama-cpp.wasm SUFFIX "" LINKER_LANGUAGE CXX)
-target_include_directories(provider PRIVATE src/generated)
+target_include_directories(provider PRIVATE
+    src/generated
+    ${llama_SOURCE_DIR}/common
+    ${llama_SOURCE_DIR}/vendor)
 # library component, no main()
 target_link_options(provider PRIVATE -mexec-model=reactor)
 target_link_libraries(provider PRIVATE llama ggml ggml-cpu ggml-base)
