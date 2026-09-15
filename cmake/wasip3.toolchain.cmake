@@ -27,7 +27,10 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 # llama.cpp uses mmap/clock/signal - each needs both the define below and the matching -l
 set(_wasi_flags "-mthread-model single -msimd128 -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_MMAN -D_WASI_EMULATED_PROCESS_CLOCKS")
 set(CMAKE_C_FLAGS_INIT   "${_wasi_flags}")
-set(CMAKE_CXX_FLAGS_INIT "${_wasi_flags} -fwasm-exceptions -include errno.h -include stdlib.h")
+# -include new: ggml/src/ggml-cpu/ops.h reads std::hardware_destructive_interference_size
+# behind a bare __cpp_lib_hardware_interference_size check, without including <new>. ggml's
+# precompiled header pulls in <vector>, which defines the macro but not the constant.
+set(CMAKE_CXX_FLAGS_INIT "${_wasi_flags} -fwasm-exceptions -include errno.h -include stdlib.h -include new")
 # -ldl required for dlopen/dlsym/dlclose stubs
 # stack-size: llama_decode overflows wasm-ld's 64KiB default (traps near address 0)
 set(_wasi_link "-fwasm-exceptions -lunwind -ldl -Wl,-z,stack-size=8388608 -lwasi-emulated-signal -lwasi-emulated-mman -lwasi-emulated-process-clocks")

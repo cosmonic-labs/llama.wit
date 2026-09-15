@@ -1,0 +1,12 @@
+# default_registry = "ghcr.io"
+
+# [namespace_registries]
+# wasi = "wasi.dev"
+
+# [namespace_registries.cosmonic]
+# registry = "ghcr.io"
+# [namespace_registries.cosmonic.metadata]
+# preferredProtocol = "oci"
+# [namespace_registries.cosmonic.metadata.oci]
+# registry = "ghcr.io"
+# namespacePrefix = "cosmonic-labs/"
