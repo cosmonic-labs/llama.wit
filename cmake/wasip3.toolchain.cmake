@@ -24,14 +24,12 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
 # compile + link flags
+# llama.cpp uses mmap/clock/signal - each needs both the define below and the matching -l
 set(_wasi_flags "-mthread-model single -msimd128 -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_MMAN -D_WASI_EMULATED_PROCESS_CLOCKS")
 set(CMAKE_C_FLAGS_INIT   "${_wasi_flags}")
-set(CMAKE_CXX_FLAGS_INIT "${_wasi_flags} -fwasm-exceptions -mllvm -wasm-use-legacy-eh=false -include errno.h -include stdlib.h")
+set(CMAKE_CXX_FLAGS_INIT "${_wasi_flags} -fwasm-exceptions -include errno.h -include stdlib.h")
 # -ldl required for dlopen/dlsym/dlclose stubs
-# stack-size: wasm-ld's default shadow stack is 64KiB, which llama.cpp (deep
-# C++ call chains, e.g. the webgpu backend's completion callbacks) overflows —
-# overflow traps as "index/memory access out of bounds" near address 0. Match
-# native llama.cpp's 8MiB thread stacks.
+# stack-size: llama_decode overflows wasm-ld's 64KiB default (traps near address 0)
 set(_wasi_link "-fwasm-exceptions -lunwind -ldl -Wl,-z,stack-size=8388608 -lwasi-emulated-signal -lwasi-emulated-mman -lwasi-emulated-process-clocks")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "${_wasi_link}")
 
