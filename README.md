@@ -15,28 +15,6 @@ cmake --build build
 
 Output at `build/llama-cpp.wasm`
 
-Dependencies are fetched into `deps/` (gitignored), which is shared across build
-directories. Override with `-DFETCHCONTENT_BASE_DIR`.
-
-## WebGPU backend
-
-`-DLLAMA_WIT_WEBGPU=ON` builds the GPU backend against `wasi:webgpu` instead of
-Dawn: `wasi-webgpu-headers` implements `webgpu.h` over wit-bindgen'd imports, and
-the C++ wrapper is the upstream-flavored `webgpu_cpp.h` from a `dawn-headers`
-release ([dawn#80](https://github.com/google/dawn/pull/80)) — no Dawn runtime is
-linked.
-
-Output at `build-webgpu/llama-cpp.wasm`, with the `wasi:webgpu` imports in place.
-
-ggml-webgpu's own build files are not modified. Off Emscripten they just call
-`find_package(Dawn REQUIRED)` and link `dawn::webgpu_dawn`, so we answer that
-with `cmake/wasi-dawn-shim/DawnConfig.cmake`, which defines that target as the
-wasi:webgpu glue instead. The only thing patched in llama.cpp is the source-level
-`__wasi__` guards in `patches/0001`, which llama.cpp#27069 upstreams verbatim.
-
-This currently pins the `p3-update-webgpu.h` branch of a `wasi-webgpu-headers`
-fork; switch back to `wasi-gfx` once that lands upstream.
-
 ## Generate Bindings
 ```shell
 cmake --build build --target regenerate-bindings

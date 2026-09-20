@@ -1,4 +1,4 @@
-package cosmonic:llama-cpp@0.3.0;
+package cosmonic:llama-cpp@0.5.0;
 
 /// LLM inference over llama.cpp.
 ///
@@ -55,11 +55,16 @@ interface api {
     /// A loaded model (weights + vocabulary). Immutable; any number of
     /// contexts can be created from one model.
     resource model {
-        /// Load a model from the raw bytes of a GGUF file. The caller reads the
-        /// file (or otherwise obtains the bytes) and passes them in, so the
-        /// provider itself does no filesystem I/O. Fails with a message if the
-        /// bytes are not a valid model.
-        create: static async func(data: list<u8>, params: option<model-params>) -> result<model, string>;
+        /// Load a model from a stream of the raw bytes of a GGUF file. The
+        /// caller reads the file (or otherwise obtains the bytes) and streams
+        /// them in, so the provider itself does no filesystem I/O — and the
+        /// full file never needs to sit in memory at once: tensor data is
+        /// consumed chunk-by-chunk as it arrives (bounded staging memory, GPU
+        /// backends upload each chunk and discard it). `size` must be the
+        /// total size of the file in bytes (the loader needs it up front;
+        /// streams don't carry a length). Fails with a message if the bytes
+        /// are not a valid model.
+        create: static async func(data: stream<u8>, size: u64, params: option<model-params>) -> result<model, string>;
 
         /// Convert text to tokens.
         ///

@@ -1,0 +1,148 @@
+--- a/src/llama-model-loader.h
++++ b/src/llama-model-loader.h
+@@ -251,10 +251,11 @@
+     // with mmap, returns a pointer into the mapping, otherwise reads into buf and returns buf
+     const void * load_data_range(const llama_tensor_weight & w, size_t offs, size_t size, void * buf) const;
+ 
+-    // Returns false if cancelled by progress_callback
++    // Returns false if cancelled by progress_callback.
++    // Takes every context at once so tensors can be ordered by file offset
++    // across all of them; see the comment in load_all_data.
+     bool load_all_data(
+-            struct ggml_context * ctx,
+-            llama_buf_map & bufs,
++            const std::vector<std::pair<ggml_context *, llama_buf_map>> & ctx_buf_maps,
+             llama_mlocks * lmlocks,
+             llama_progress_callback progress_callback,
+             void * progress_callback_user_data);
+--- a/src/llama-model-loader.cpp
++++ b/src/llama-model-loader.cpp
+@@ -1484,14 +1484,15 @@
+ }
+ 
+ bool llama_model_loader::load_all_data(
+-        struct ggml_context * ctx,
+-        llama_buf_map & bufs,
++        const std::vector<std::pair<ggml_context *, llama_buf_map>> & ctx_buf_maps,
+         llama_mlocks * lmlocks,
+         llama_progress_callback progress_callback,
+         void * progress_callback_user_data) {
+     if (files.empty()) {
+-        for (ggml_tensor * t = ggml_get_first_tensor(ctx); t != nullptr; t = ggml_get_next_tensor(ctx, t)) {
+-            set_tensor_data(t, set_tensor_data_ud);
++        for (const auto & it : ctx_buf_maps) {
++            for (ggml_tensor * t = ggml_get_first_tensor(it.first); t != nullptr; t = ggml_get_next_tensor(it.first, t)) {
++                set_tensor_data(t, set_tensor_data_ud);
++            }
+         }
+         return true;
+     }
+@@ -1522,7 +1523,15 @@
+         }
+         // When not using mmaped io use async uploads from pinned memory to GPU memory.
+         // First determine if the backend supports the necessary features for async uploads.
+-        auto * buf = bufs.count(0) ? bufs.at(0) : nullptr;
++        // Prefer a non-host (GPU) weights buffer, falling back to the first found.
++        ggml_backend_buffer_t buf = nullptr;
++        for (const auto & it : ctx_buf_maps) {
++            for (const auto & kv : it.second) {
++                if (!buf || (ggml_backend_buffer_is_host(buf) && !ggml_backend_buffer_is_host(kv.second))) {
++                    buf = kv.second;
++                }
++            }
++        }
+         if (!buf) {
+             LLAMA_LOG_DEBUG("%s: no buffer found for async uploads\n", func);
+             return nullptr;
+@@ -1591,36 +1600,40 @@
+     }(__func__);
+ 
+     if (upload_backend) {
+-        LLAMA_LOG_DEBUG("%s: using async uploads for device %s, buffer type %s, backend %s\n", __func__,
++        LLAMA_LOG_DEBUG("%s: using async uploads for device %s, backend %s\n", __func__,
+             ggml_backend_dev_name(ggml_backend_get_device(upload_backend)),
+-            ggml_backend_buft_name(ggml_backend_buffer_get_type(bufs.at(0))),
+             ggml_backend_name(upload_backend));
+     }
+ 
+-    std::vector<ggml_tensor *> tensors;
+-    for (struct ggml_tensor * cur = ggml_get_first_tensor(ctx); cur != NULL; cur = ggml_get_next_tensor(ctx, cur)) {
+-        tensors.push_back(cur);
+-    }
+-
+-    // without mmap, tensors in non-host buffers are staged through a temporary buffer sized like the tensor
+-    // load them biggest-first so the largest staging buffer is allocated while the fewest weights are resident
+-    if (!use_mmap) {
+-        std::stable_sort(tensors.begin(), tensors.end(), [](const ggml_tensor * a, const ggml_tensor * b) {
+-            const bool staged_a = a->buffer && !ggml_backend_buffer_is_host(a->buffer);
+-            const bool staged_b = b->buffer && !ggml_backend_buffer_is_host(b->buffer);
+-            if (staged_a != staged_b) {
+-                return staged_a;
++    // Visit tensors in file order across every context, so a non-seekable source
++    // (a stream-backed FILE *) only ever seeks forward. This deliberately replaces
++    // upstream's biggest-first staging order, which is free to jump around the
++    // file; bounding peak staging memory has to come from elsewhere.
++    struct load_item {
++        ggml_tensor *               tensor;
++        const llama_tensor_weight * weight;
++        const llama_buf_map *       bufs;
++    };
++    std::vector<load_item> tensors;
++    for (const auto & it : ctx_buf_maps) {
++        for (struct ggml_tensor * cur = ggml_get_first_tensor(it.first); cur != NULL; cur = ggml_get_next_tensor(it.first, cur)) {
++            const auto * w = get_weight(ggml_get_name(cur));
++            if (w == nullptr) {
++                // this can happen with split experts models
++                continue;
+             }
+-            return staged_a && ggml_nbytes(a) > ggml_nbytes(b);
+-        });
+-    }
+-
+-    for (struct ggml_tensor * cur : tensors) {
+-        const auto * weight = get_weight(ggml_get_name(cur));
+-        if (weight == nullptr) {
+-            // this can happen with split experts models
+-            continue;
++            tensors.push_back({cur, w, &it.second});
+         }
++    }
++    std::sort(tensors.begin(), tensors.end(), [](const load_item & a, const load_item & b) {
++        return a.weight->idx != b.weight->idx ? a.weight->idx < b.weight->idx
++                                              : a.weight->offs < b.weight->offs;
++    });
++
++    for (const auto & item : tensors) {
++        struct ggml_tensor *  cur    = item.tensor;
++        const auto *          weight = item.weight;
++        const llama_buf_map & bufs   = *item.bufs;
+ 
+         if (progress_callback) {
+             if (!progress_callback((float) size_done / size_data, progress_callback_user_data)) {
+--- a/src/llama-model.cpp
++++ b/src/llama-model.cpp
+@@ -1831,19 +1831,11 @@
+         return true;
+     }
+ 
+-    // without mmap, load non-host buffers first: their tensors go through a staging buffer, which is cheapest while the fewest weights are resident
+-    if (!ml.use_mmap) {
+-        std::stable_partition(ctx_buf_maps.begin(), ctx_buf_maps.end(), [](const auto & ctx_buf_map) {
+-            const auto & buf_map = ctx_buf_map.second;
+-            return !buf_map.empty() && !ggml_backend_buffer_is_host(buf_map.begin()->second);
+-        });
+-    }
+-
+-    // load tensor data
+-    for (auto & [ctx, buf_map] : ctx_buf_maps) {
+-        if (!ml.load_all_data(ctx, buf_map, use_mlock ? &pimpl->mlock_mmaps : NULL, params.progress_callback, params.progress_callback_user_data)) {
+-            return false;
+-        }
++    // load tensor data — every context in one call, so the loader can order
++    // tensors by file offset across all of them (see load_all_data). That
++    // ordering supersedes the biggest-first staging order upstream uses here.
++    if (!ml.load_all_data(ctx_buf_maps, use_mlock ? &pimpl->mlock_mmaps : NULL, params.progress_callback, params.progress_callback_user_data)) {
++        return false;
+     }
+ 
+     if (use_mmap_buffer) {

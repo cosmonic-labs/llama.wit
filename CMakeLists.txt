@@ -21,15 +21,10 @@ set(GGML_OPENMP       OFF CACHE BOOL "" FORCE)
 set(GGML_BACKEND_DL   OFF CACHE BOOL "" FORCE)
 set(LLAMA_CURL        OFF CACHE BOOL "" FORCE)
 
-# Not warnings on upstream llama.cpp
-set(LLAMA_ALL_WARNINGS OFF CACHE BOOL "" FORCE)
-
 # Optional wasi:webgpu GPU backend. The build-system side is done from out here
-# (see the Dawn_DIR shim below), so the only thing patched in llama.cpp is
+# (see the Dawn_DIR shim below), so the only thing patched into ggml for this is
 # patches/0001 — source-level #ifdefs, which
-# https://github.com/ggml-org/llama.cpp/pull/27069 upstreams verbatim. Once that
-# merges, patches/ can go away entirely.
-
+# https://github.com/ggml-org/llama.cpp/pull/27069 upstreams verbatim.
 option(LLAMA_WIT_WEBGPU "Build with the wasi:webgpu GPU backend" OFF)
 
 # The webgpu glue, in two pinned pieces:
@@ -54,14 +49,6 @@ set(DAWN_HEADERS_URL "https://github.com/google/dawn/releases/download/v20260825
 set(DAWN_HEADERS_SHA256 "929f0548ff6a0d728d4a39e036139694211671a38d838f9f2d7e22181a6f98f2"
     CACHE STRING "SHA256 of DAWN_HEADERS_URL")
 
-# Applies a patch idempotently: skip if already applied, else apply
-# (fuzz-tolerant, since a pin may drift from the base the patch was cut against).
-function(idempotent_patch out_var patch)
-    set(${out_var} PATCH_COMMAND sh -c
-        "git apply --reverse --check '${patch}' 2>/dev/null || patch -p1 --forward --fuzz=3 < '${patch}'"
-        PARENT_SCOPE)
-endfunction()
-
 if(LLAMA_WIT_WEBGPU)
     set(GGML_WEBGPU ON CACHE BOOL "" FORCE)
 
@@ -83,8 +70,8 @@ if(LLAMA_WIT_WEBGPU)
     FetchContent_MakeAvailable(wasi_webgpu_headers dawn_headers)
 
     # Read by cmake/wasi-dawn-shim/DawnConfig.cmake.
-    set(WASI_WEBGPU_HEADERS_DIR   ${wasi_webgpu_headers_SOURCE_DIR} CACHE PATH "" FORCE)
-    set(DAWN_HEADERS_DIR          ${dawn_headers_SOURCE_DIR} CACHE PATH "" FORCE)
+    set(WASI_WEBGPU_HEADERS_DIR ${wasi_webgpu_headers_SOURCE_DIR} CACHE PATH "" FORCE)
+    set(DAWN_HEADERS_DIR        ${dawn_headers_SOURCE_DIR} CACHE PATH "" FORCE)
 
     # ggml-webgpu's CMakeLists has no WASI branch — off Emscripten it just does
     # find_package(Dawn REQUIRED) and links dawn::webgpu_dawn. Rather than patch
@@ -93,9 +80,24 @@ if(LLAMA_WIT_WEBGPU)
     set(Dawn_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake/wasi-dawn-shim CACHE PATH "" FORCE)
 endif()
 
-# Applied unconditionally: the overlay only touches ggml-webgpu, which a CPU-only
-# build never compiles, and deps/ is shared by build trees configured both ways.
-idempotent_patch(_llama_patch ${CMAKE_CURRENT_SOURCE_DIR}/patches/0001-ggml-webgpu-wasi.patch)
+# Patches applied to the fetched llama.cpp tree, idempotently. Detection uses the
+# same tool and fuzz as application: a patch that once landed with fuzz is not
+# reverse-detectable by `git apply` (strict), and `patch --forward` then exits 1
+# on "previously applied" — which would fail the populate step forever.
+# - 0002 (always): visit tensors in file-offset order so a forward-only
+#   stream-backed FILE* never needs to seek backwards.
+# - 0001 (webgpu builds): __wasi__ guards on Dawn-native-only features.
+set(_patches ${CMAKE_CURRENT_SOURCE_DIR}/patches/0002-stream-ordered-tensor-loading.patch)
+if(LLAMA_WIT_WEBGPU)
+    list(PREPEND _patches ${CMAKE_CURRENT_SOURCE_DIR}/patches/0001-ggml-webgpu-wasi.patch)
+endif()
+# NOTE: no literal ';' in the command — CMake would split it into list items.
+set(_apply "true")
+foreach(_patch IN LISTS _patches)
+    string(APPEND _apply " && (patch -p1 --reverse --dry-run --force --fuzz=3 < '${_patch}' >/dev/null 2>&1 || patch -p1 --forward --fuzz=3 < '${_patch}')")
+endforeach()
+set(_llama_patch PATCH_COMMAND sh -c "${_apply}")
+
 # llama is the one dependency we add_subdirectory, so its build tree must stay
 # per-build-dir; only the checkout is shared via deps/.
 FetchContent_Declare(llama
