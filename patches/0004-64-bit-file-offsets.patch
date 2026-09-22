@@ -1,0 +1,308 @@
+--- a/ggml/include/gguf.h
++++ b/ggml/include/gguf.h
+@@ -93,7 +93,7 @@
+ 
+     GGML_API uint32_t gguf_get_version    (const struct gguf_context * ctx);
+     GGML_API size_t   gguf_get_alignment  (const struct gguf_context * ctx);
+-    GGML_API size_t   gguf_get_data_offset(const struct gguf_context * ctx);  // padded to gguf_get_alignment if and only if the gguf_context contains at least one tensor
++    GGML_API uint64_t gguf_get_data_offset(const struct gguf_context * ctx);  // padded to gguf_get_alignment if and only if the gguf_context contains at least one tensor
+ 
+     GGML_API int64_t      gguf_get_n_kv(const struct gguf_context * ctx);
+     GGML_API int64_t      gguf_find_key(const struct gguf_context * ctx, const char * key); // returns -1 if key is not found
+@@ -127,7 +127,7 @@
+ 
+     GGML_API int64_t         gguf_get_n_tensors    (const struct gguf_context * ctx);
+     GGML_API int64_t         gguf_find_tensor      (const struct gguf_context * ctx, const char * name); // returns -1 if the tensor is not found
+-    GGML_API size_t          gguf_get_tensor_offset(const struct gguf_context * ctx, int64_t tensor_id);
++    GGML_API uint64_t        gguf_get_tensor_offset(const struct gguf_context * ctx, int64_t tensor_id);
+     GGML_API const char *    gguf_get_tensor_name  (const struct gguf_context * ctx, int64_t tensor_id);
+     GGML_API const int64_t * gguf_get_tensor_ne    (const struct gguf_context * ctx, int64_t tensor_id); // returns ne, an array of GGML_MAX_DIMS elements; ne[dim] is 1 for dim >= n_dims
+     GGML_API enum ggml_type  gguf_get_tensor_type  (const struct gguf_context * ctx, int64_t tensor_id);
+--- a/ggml/src/gguf.cpp
++++ b/ggml/src/gguf.cpp
+@@ -222,8 +222,10 @@
+     std::vector<struct gguf_tensor_info> info;
+ 
+     size_t alignment = GGUF_DEFAULT_ALIGNMENT;
+-    size_t offset    = 0; // offset of `data` from beginning of file
+-    size_t size      = 0; // size of `data` in bytes
++    // 64-bit even where size_t is 32-bit (wasm32): these are file positions, and
++    // a GGUF may exceed 4 GiB even when no single allocation does.
++    uint64_t offset  = 0; // offset of `data` from beginning of file
++    uint64_t size    = 0; // size of `data` in bytes
+ 
+     void * data = nullptr;
+ };
+@@ -778,15 +780,15 @@
+         for (size_t i = 0; i < ctx->info.size(); ++i) {
+             const gguf_tensor_info & ti = ctx->info[i];
+             if (ti.offset != ctx->size) {
+-                GGML_LOG_ERROR("%s: tensor '%s' has offset %" PRIu64 ", expected %zu\n",
++                GGML_LOG_ERROR("%s: tensor '%s' has offset %" PRIu64 ", expected %" PRIu64 "\n",
+                     __func__, ti.t.name, ti.offset, ctx->size);
+                 GGML_LOG_ERROR("%s: failed to read tensor data\n", __func__);
+                 gguf_free(ctx);
+                 return nullptr;
+             }
+             size_t padded_size = GGML_PAD(ggml_nbytes(&ti.t), ctx->alignment);
+-            if (SIZE_MAX - ctx->size < padded_size) {
+-                GGML_LOG_ERROR("%s: tensor '%s' size overflow, cannot accumulate size %zu + %zu\n",
++            if (UINT64_MAX - ctx->size < padded_size) {
++                GGML_LOG_ERROR("%s: tensor '%s' size overflow, cannot accumulate size %" PRIu64 " + %zu\n",
+                     __func__, ti.t.name, ctx->size, padded_size);
+                 gguf_free(ctx);
+                 return nullptr;
+@@ -1023,7 +1025,7 @@
+     return ctx->alignment;
+ }
+ 
+-size_t gguf_get_data_offset(const struct gguf_context * ctx) {
++uint64_t gguf_get_data_offset(const struct gguf_context * ctx) {
+     return ctx->offset;
+ }
+ 
+@@ -1186,7 +1188,7 @@
+     return tensor_id;
+ }
+ 
+-size_t gguf_get_tensor_offset(const struct gguf_context * ctx, int64_t tensor_id) {
++uint64_t gguf_get_tensor_offset(const struct gguf_context * ctx, int64_t tensor_id) {
+     GGML_ASSERT(tensor_id >= 0 && tensor_id < gguf_get_n_tensors(ctx));
+     return ctx->info[tensor_id].offset;
+ }
+--- a/src/llama-mmap.h
++++ b/src/llama-mmap.h
+@@ -19,12 +19,13 @@
+     llama_file(FILE * file);
+     ~llama_file();
+ 
+-    size_t tell() const;
+-    size_t size() const;
++    // file positions are 64-bit even where size_t is 32-bit (wasm32)
++    uint64_t tell() const;
++    uint64_t size() const;
+ 
+     int file_id() const; // fileno overload
+ 
+-    void seek(size_t offset, int whence) const;
++    void seek(uint64_t offset, int whence) const;
+ 
+     void read_raw(void * ptr, size_t len);
+     void read_raw_unsafe(void * ptr, size_t len);
+--- a/src/llama-mmap.cpp
++++ b/src/llama-mmap.cpp
+@@ -103,7 +103,7 @@
+         seek(0, SEEK_SET);
+     }
+ 
+-    size_t tell() const {
++    uint64_t tell() const {
+         LARGE_INTEGER li;
+         li.QuadPart = 0;
+         BOOL ret = SetFilePointerEx(fp_win32, li, &li, FILE_CURRENT);
+@@ -114,7 +114,7 @@
+         return li.QuadPart;
+     }
+ 
+-    void seek(size_t offset, int whence) const {
++    void seek(uint64_t offset, int whence) const {
+         static_assert(SEEK_SET == FILE_BEGIN, "SEEK_SET != FILE_BEGIN");
+         static_assert(SEEK_CUR == FILE_CURRENT, "SEEK_CUR != FILE_CURRENT");
+         static_assert(SEEK_END == FILE_END, "SEEK_END != FILE_END");
+@@ -233,29 +233,29 @@
+         seek(0, SEEK_SET);
+     }
+ 
+-    size_t tell() const {
++    uint64_t tell() const {
+         if (fd == -1) {
+             off_t ret = llama_mmap_ftell(fp);
+             if (ret == -1) {
+                 throw std::runtime_error(format("ftell error: %s", strerror(errno)));
+             }
+ 
+-            return (size_t) ret;
++            return (uint64_t) ret;
+         }
+ 
+         off_t pos = lseek(fd, 0, SEEK_CUR);
+         if (pos == -1) {
+             throw std::runtime_error(format("lseek error: %s", strerror(errno)));
+         }
+-        return (size_t) pos;
++        return (uint64_t) pos;
+     }
+ 
+-    void seek(size_t offset, int whence) const {
++    void seek(uint64_t offset, int whence) const {
+         off_t ret = 0;
+         if (fd == -1) {
+-            ret = llama_mmap_fseek(fp, offset, whence);
++            ret = llama_mmap_fseek(fp, (off_t) offset, whence);
+         } else {
+-            ret = lseek(fd, offset, whence);
++            ret = lseek(fd, (off_t) offset, whence);
+         }
+         if (ret == -1) {
+             throw std::runtime_error(format("seek error: %s", strerror(errno)));
+@@ -268,8 +268,8 @@
+         }
+         errno = 0;
+         if (fd == -1) {
+-            const size_t curr_off = tell();
+-            const size_t to_read = std::min(len, size - curr_off);
++            const uint64_t curr_off = tell();
++            const size_t to_read = (size_t) std::min<uint64_t>(len, size - curr_off);
+ 
+             std::size_t ret = std::fread(ptr, to_read, 1, fp);
+             if (ferror(fp)) {
+@@ -305,7 +305,7 @@
+                 if (ret == 0) {
+                     // EOF: allow if this read was only pulling alignment padding past file end
+                     off_t pos = lseek(fd, 0, SEEK_CUR);
+-                    if (pos != -1 && (size_t) pos == size) {
++                    if (pos != -1 && (uint64_t) pos == size) {
+                         std::memset(reinterpret_cast<char *>(ptr) + bytes_read, 0, len - bytes_read);
+                         return;
+                     }
+@@ -318,8 +318,9 @@
+     }
+ 
+     void read_aligned_chunk(void * dest, size_t size) {
+-        size_t offset = tell();
+-        off_t aligned_offset = offset & ~(alignment - 1);
++        uint64_t offset = tell();
++        // build the mask in 64 bits: a 32-bit size_t mask would clear the high half
++        off_t aligned_offset = (off_t) (offset & ~((uint64_t) alignment - 1));
+         off_t offset_from_alignment = offset - aligned_offset;
+         size_t bytes_to_read = (offset_from_alignment + size + alignment - 1) & ~(alignment - 1);
+ 
+@@ -392,7 +393,7 @@
+     size_t alignment = 1;
+ 
+     FILE * fp{};
+-    size_t size{};
++    uint64_t size{};
+     bool owns_fp = true;
+ };
+ 
+@@ -403,8 +404,8 @@
+ 
+ llama_file::~llama_file() = default;
+ 
+-size_t llama_file::tell() const { return pimpl->tell(); }
+-size_t llama_file::size() const { return pimpl->size; }
++uint64_t llama_file::tell() const { return pimpl->tell(); }
++uint64_t llama_file::size() const { return pimpl->size; }
+ 
+ size_t llama_file::read_alignment() const { return pimpl->read_alignment(); }
+ bool llama_file::has_direct_io() const { return pimpl->has_direct_io(); }
+@@ -424,7 +425,7 @@
+ #endif
+ }
+ 
+-void llama_file::seek(size_t offset, int whence) const { pimpl->seek(offset, whence); }
++void llama_file::seek(uint64_t offset, int whence) const { pimpl->seek(offset, whence); }
+ void llama_file::read_raw(void * ptr, size_t len) { pimpl->read_raw(ptr, len); }
+ #ifdef _WIN32
+ void llama_file::read_raw_unsafe(void * ptr, size_t len) { pimpl->read_raw(ptr, len); }
+@@ -488,7 +489,7 @@
+         auto advise = [&](size_t beg, size_t end, int advice, const char * name) {
+             const size_t page_size = sysconf(_SC_PAGESIZE);
+             beg = beg & ~(page_size - 1);
+-            end = std::min((end + page_size - 1) & ~(page_size - 1), file->size());
++            end = std::min((end + page_size - 1) & ~(page_size - 1), (size_t) file->size());
+             if (beg >= end) {
+                 return;
+             }
+@@ -498,7 +499,7 @@
+         };
+ 
+         if (prefetch > 0) {
+-            for (const auto & range : ranges_complement(lazy_ranges, std::min(file->size(), prefetch))) {
++            for (const auto & range : ranges_complement(lazy_ranges, std::min((size_t) file->size(), prefetch))) {
+                 advise(range.first, range.second, POSIX_MADV_WILLNEED, "POSIX_MADV_WILLNEED");
+             }
+         }
+--- a/src/llama-model-loader.h
++++ b/src/llama-model-loader.h
+@@ -33,7 +33,7 @@
+     // Holds information on a model weight
+     struct llama_tensor_weight {
+         uint16_t  idx; // source file index
+-        size_t   offs; // tensor data offset in the original file
++        uint64_t offs; // tensor data offset in the original file (64-bit even on wasm32)
+ 
+         ggml_tensor * tensor;
+ 
+@@ -136,8 +136,8 @@
+     std::string arch_name;
+     LLM_KV      llm_kv    = LLM_KV(LLM_ARCH_UNKNOWN);
+ 
+-    size_t size_done = 0;
+-    size_t size_data = 0;
++    uint64_t size_done = 0; // byte counts over all files; may exceed a 32-bit size_t
++    uint64_t size_data = 0;
+     std::vector<std::pair<size_t, size_t>> mmaps_used;
+ 
+     // define a comparator for the buft -> ctx map to ensure that the order is well-defined:
+--- a/src/llama-model-loader.cpp
++++ b/src/llama-model-loader.cpp
+@@ -1451,8 +1451,9 @@
+         if (!weight || weight->idx != idx) {
+             continue;
+         }
+-        *first = std::min(*first, weight->offs);
+-        *last  = std::max(*last,  weight->offs + ggml_nbytes(tensor));
++        // mmap-only: a mapping is addressable, so its offsets fit size_t
++        *first = std::min(*first, (size_t) weight->offs);
++        *last  = std::max(*last,  (size_t) (weight->offs + ggml_nbytes(tensor)));
+     }
+ }
+ 
+@@ -1670,8 +1671,8 @@
+                 }
+ 
+                 auto & mmap_used = mmaps_used[weight->idx];
+-                mmap_used.first  = std::min(mmap_used.first,  weight->offs);
+-                mmap_used.second = std::max(mmap_used.second, weight->offs + n_size);
++                mmap_used.first  = std::min(mmap_used.first,  (size_t) weight->offs);
++                mmap_used.second = std::max(mmap_used.second, (size_t) (weight->offs + n_size));
+             } else {
+                 ggml_backend_tensor_set(cur, data, 0, n_size);
+             }
+@@ -1689,15 +1690,18 @@
+             } else {
+                 // If upload_backend is valid load the tensor in chunks to pinned memory and upload the buffers asynchronously to the GPU.
+                 if (upload_backend) {
+-                    size_t offset = weight->offs;
++                    // file positions are 64-bit; build the mask in 64 bits too, since a
++                    // 32-bit size_t mask would clear the high half of the offset
++                    uint64_t offset = weight->offs;
+                     alignment = file->read_alignment();
+-                    size_t aligned_offset = offset & ~(alignment - 1);
+-                    size_t offset_from_alignment = offset - aligned_offset;
++                    const uint64_t align_mask = ~((uint64_t) alignment - 1);
++                    uint64_t aligned_offset = offset & align_mask;
++                    size_t offset_from_alignment = (size_t) (offset - aligned_offset);
+                     file->seek(aligned_offset, SEEK_SET);
+ 
+                     // Calculate aligned read boundaries
+-                    size_t read_start = aligned_offset;
+-                    size_t read_end = (offset + n_size + alignment - 1) & ~(alignment - 1);
++                    uint64_t read_start = aligned_offset;
++                    uint64_t read_end = (offset + n_size + alignment - 1) & align_mask;
+ 
+                     size_t bytes_read = 0;
+                     size_t data_read = 0;  // Actual tensor data copied (excluding padding)
+--- a/src/llama-adapter.cpp
++++ b/src/llama-adapter.cpp
+@@ -396,7 +396,7 @@
+         llama_file gguf_file(path_lora, "rb");
+         std::vector<uint8_t> read_buf;
+         auto set_tensor = [&](ggml_tensor * orig, ggml_tensor * dev) {
+-            const size_t offs = gguf_get_data_offset(ctx_gguf.get()) + gguf_get_tensor_offset(ctx_gguf.get(), gguf_find_tensor(ctx_gguf.get(), orig->name));
++            const uint64_t offs = gguf_get_data_offset(ctx_gguf.get()) + gguf_get_tensor_offset(ctx_gguf.get(), gguf_find_tensor(ctx_gguf.get(), orig->name));
+             const size_t size = ggml_nbytes(orig);
+             if (offs + size < offs || offs + size > gguf_file.size()) {
+                 throw std::runtime_error(format("LoRA tensor '%s' data is not within the file bounds, file is corrupted or incomplete", orig->name));

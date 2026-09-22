@@ -80,23 +80,39 @@ if(LLAMA_WIT_WEBGPU)
     set(Dawn_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake/wasi-dawn-shim CACHE PATH "" FORCE)
 endif()
 
-# Patches applied to the fetched llama.cpp tree, idempotently. Detection uses the
-# same tool and fuzz as application: a patch that once landed with fuzz is not
-# reverse-detectable by `git apply` (strict), and `patch --forward` then exits 1
-# on "previously applied" — which would fail the populate step forever.
-# - 0002 (always): visit tensors in file-offset order so a forward-only
-#   stream-backed FILE* never needs to seek backwards.
-# - 0001 (webgpu builds): __wasi__ guards on Dawn-native-only features.
-set(_patches ${CMAKE_CURRENT_SOURCE_DIR}/patches/0002-stream-ordered-tensor-loading.patch)
-if(LLAMA_WIT_WEBGPU)
-    list(PREPEND _patches ${CMAKE_CURRENT_SOURCE_DIR}/patches/0001-ggml-webgpu-wasi.patch)
-endif()
+# Patches applied to the fetched llama.cpp tree, in order:
+# - 0001: __wasi__ guards on Dawn-native-only features (llama.cpp#27069).
+# - 0002: visit tensors in file-offset order so a forward-only stream-backed
+#   FILE* never needs to seek backwards.
+# - 0003: ggml-webgpu advertises async uploads + events + a host buffer type on
+#   wasi, so the loader stages GPU-bound tensors through 4 x 1 MiB buffers
+#   instead of a host copy of each whole tensor.
+# - 0004: file offsets and sizes as uint64_t instead of size_t (llama_file,
+#   llama_tensor_weight, gguf's data/tensor offset getters). size_t is 32-bit
+#   on wasm32, so without this any GGUF file over 4 GiB fails to load.
+# All applied unconditionally: 0001 and 0003 only touch ggml-webgpu, which a
+# CPU-only build never compiles, and deps/ is shared by build trees configured
+# both ways — per-config patch lists would make the shared tree flip-flop.
+set(_patches
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0001-ggml-webgpu-wasi.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0002-stream-ordered-tensor-loading.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0003-ggml-webgpu-async-uploads.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0004-64-bit-file-offsets.patch)
+# Idempotent: detection uses the same tool and fuzz as application. (A patch that
+# landed with fuzz is not reverse-detectable by strict `git apply`, and
+# `patch --forward` then exits 1 on "previously applied", failing populate.)
+# Each patch's hash rides along in the command: FetchContent re-runs the patch
+# step only when the command changes, so without it editing a patch file would
+# never reach an already-populated tree.
 # NOTE: no literal ';' in the command — CMake would split it into list items.
 set(_apply "true")
 foreach(_patch IN LISTS _patches)
-    string(APPEND _apply " && (patch -p1 --reverse --dry-run --force --fuzz=3 < '${_patch}' >/dev/null 2>&1 || patch -p1 --forward --fuzz=3 < '${_patch}')")
+    file(SHA256 ${_patch} _patch_hash)
+    string(APPEND _apply " && (patch -p1 --reverse --dry-run --force --fuzz=3 < '${_patch}' >/dev/null 2>&1 || patch -p1 --forward --fuzz=3 < '${_patch}') && true ${_patch_hash}")
 endforeach()
 set(_llama_patch PATCH_COMMAND sh -c "${_apply}")
+# ...and re-run configure itself when a patch file changes.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_patches})
 
 # llama is the one dependency we add_subdirectory, so its build tree must stay
 # per-build-dir; only the checkout is shared via deps/.
