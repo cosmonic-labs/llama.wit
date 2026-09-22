@@ -1,0 +1,97 @@
+--- a/ggml/src/ggml-webgpu/ggml-webgpu.cpp
++++ b/ggml/src/ggml-webgpu/ggml-webgpu.cpp
+@@ -29,6 +29,7 @@
+ #include <mutex>
+ #include <optional>
+ #include <string>
++#include <unordered_map>
+ #include <utility>
+ #include <vector>
+ 
+@@ -87,6 +88,9 @@
+ /* Constants */
+ 
+ #define WEBGPU_DEFAULT_COMMAND_SUBMIT_BATCH_SIZE 256u
++// Cap on cached bind groups; on overflow the cache is dropped and refills over
++// the next graph. One entry per (pipeline, bindings) combination actually used.
++#define WEBGPU_MAX_CACHED_BIND_GROUPS            8192u
+ #define WEBGPU_NUM_PARAM_SLOT_SAFETY_MARGIN      10u
+ #define WEBGPU_RUNTIME_WAIT_TIMEOUT_MS           30000u
+ #define WEBGPU_RUNTIME_WAIT_TIMEOUT_NS           (WEBGPU_RUNTIME_WAIT_TIMEOUT_MS * 1e6)
+@@ -224,6 +228,16 @@
+     wgpu::Buffer    memset_params_buf;
+     webgpu_pipeline memset_pipeline;
+ 
++    // Without these, every dispatch calls GetBindGroupLayout + CreateBindGroup:
++    // two hostcalls per node, ~1.5k per token on a 40-layer model. The graph is
++    // identical from token to token, and the parameter arena hands out slots in
++    // the same order after each reset, so the same (pipeline, bindings, offsets)
++    // recur and hit. Keyed on the complete binding set, and dropped whenever a
++    // buffer is freed: a later buffer could reuse that handle and a stale entry
++    // would then point at the wrong memory.
++    std::unordered_map<std::string, wgpu::BindGroup>        bind_group_cache;
++    std::unordered_map<const void *, wgpu::BindGroupLayout> bind_group_layout_cache;
++
+     std::string vendor;
+ 
+     // TODO: We should rework the CPU profiling time handling to make it more useful. ref: https://github.com/ggml-org/llama.cpp/pull/22050
+@@ -619,12 +633,41 @@
+         entries.push_back(ggml_webgpu_make_bind_group_entry(params_binding_num, ctx->param_arena.buffer, param_offset,
+                                                             ctx->param_arena.slot_size));
+ 
+-        wgpu::BindGroupDescriptor bind_group_desc;
+-        bind_group_desc.layout     = dispatch.pipeline.pipeline.GetBindGroupLayout(0);
+-        bind_group_desc.entryCount = entries.size();
+-        bind_group_desc.entries    = entries.data();
+-        bind_group_desc.label      = dispatch.pipeline.name.c_str();
+-        bind_groups.push_back(ctx->global_ctx->device.CreateBindGroup(&bind_group_desc));
++        // Cache key: the pipeline plus every binding (all of them are buffer
++        // bindings here), so an entry can only be reused for an identical set.
++        const void * pipeline_ptr = dispatch.pipeline.pipeline.Get();
++        std::string  key;
++        key.reserve(sizeof(pipeline_ptr) + entries.size() * (sizeof(uint32_t) + sizeof(void *) + 2 * sizeof(uint64_t)));
++        key.append(reinterpret_cast<const char *>(&pipeline_ptr), sizeof(pipeline_ptr));
++        for (const auto & e : entries) {
++            const void * buffer_ptr = e.buffer.Get();
++            key.append(reinterpret_cast<const char *>(&e.binding), sizeof(e.binding));
++            key.append(reinterpret_cast<const char *>(&buffer_ptr), sizeof(buffer_ptr));
++            key.append(reinterpret_cast<const char *>(&e.offset), sizeof(e.offset));
++            key.append(reinterpret_cast<const char *>(&e.size), sizeof(e.size));
++        }
++
++        auto & bg_cache = ctx->global_ctx->bind_group_cache;
++        auto   bg_it    = bg_cache.find(key);
++        if (bg_it == bg_cache.end()) {
++            auto & layout_cache = ctx->global_ctx->bind_group_layout_cache;
++            auto   layout_it    = layout_cache.find(pipeline_ptr);
++            if (layout_it == layout_cache.end()) {
++                layout_it = layout_cache.emplace(pipeline_ptr, dispatch.pipeline.pipeline.GetBindGroupLayout(0)).first;
++            }
++
++            wgpu::BindGroupDescriptor bind_group_desc;
++            bind_group_desc.layout     = layout_it->second;
++            bind_group_desc.entryCount = entries.size();
++            bind_group_desc.entries    = entries.data();
++            bind_group_desc.label      = dispatch.pipeline.name.c_str();
++
++            if (bg_cache.size() >= WEBGPU_MAX_CACHED_BIND_GROUPS) {
++                bg_cache.clear();
++            }
++            bg_it = bg_cache.emplace(std::move(key), ctx->global_ctx->device.CreateBindGroup(&bind_group_desc)).first;
++        }
++        bind_groups.push_back(bg_it->second);
+         param_offsets.push_back(param_offset);
+     }
+ 
+@@ -3661,6 +3704,11 @@
+ static void ggml_backend_webgpu_buffer_free_buffer(ggml_backend_buffer_t buffer) {
+     ggml_backend_webgpu_buffer_context * ctx = static_cast<ggml_backend_webgpu_buffer_context *>(buffer->context);
+     if (ctx != nullptr && ctx->buffer != nullptr) {
++        // Bind groups are keyed partly on buffer handles, and a later buffer may
++        // reuse this one's, so drop the cache rather than risk a stale binding.
++        if (ctx->global_ctx) {
++            ctx->global_ctx->bind_group_cache.clear();
++        }
+         ctx->buffer.Destroy();
+         delete ctx;
+     }

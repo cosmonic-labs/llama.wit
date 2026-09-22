@@ -93,6 +93,9 @@ endif()
 # - 0006: ggml-webgpu stages op params on the CPU and uploads them once per
 #   submit batch instead of one queue.write-buffer per dispatch (~766 hostcalls
 #   per token on a 40-layer model), and raises that batch from 64 to 256.
+# - 0007: ggml-webgpu caches bind groups and bind group layouts, which were
+#   rebuilt for every dispatch (two more hostcalls per node). Invalidated when
+#   any buffer is freed.
 # All applied unconditionally: 0001 and 0003 only touch ggml-webgpu, which a
 # CPU-only build never compiles, and deps/ is shared by build trees configured
 # both ways — per-config patch lists would make the shared tree flip-flop.
@@ -101,7 +104,8 @@ set(_patches
     ${CMAKE_CURRENT_SOURCE_DIR}/patches/0002-stream-ordered-tensor-loading.patch
     ${CMAKE_CURRENT_SOURCE_DIR}/patches/0003-ggml-webgpu-async-uploads.patch
     ${CMAKE_CURRENT_SOURCE_DIR}/patches/0004-64-bit-file-offsets.patch
-    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0006-webgpu-batch-param-uploads.patch)
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0006-webgpu-batch-param-uploads.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0007-webgpu-cache-bind-groups.patch)
 # Idempotent: detection uses the same tool and fuzz as application. (A patch that
 # landed with fuzz is not reverse-detectable by strict `git apply`, and
 # `patch --forward` then exits 1 on "previously applied", failing populate.)
