@@ -90,6 +90,9 @@ endif()
 # - 0004: file offsets and sizes as uint64_t instead of size_t (llama_file,
 #   llama_tensor_weight, gguf's data/tensor offset getters). size_t is 32-bit
 #   on wasm32, so without this any GGUF file over 4 GiB fails to load.
+# - 0006: ggml-webgpu stages op params on the CPU and uploads them once per
+#   submit batch instead of one queue.write-buffer per dispatch (~766 hostcalls
+#   per token on a 40-layer model), and raises that batch from 64 to 256.
 # All applied unconditionally: 0001 and 0003 only touch ggml-webgpu, which a
 # CPU-only build never compiles, and deps/ is shared by build trees configured
 # both ways — per-config patch lists would make the shared tree flip-flop.
@@ -97,7 +100,8 @@ set(_patches
     ${CMAKE_CURRENT_SOURCE_DIR}/patches/0001-ggml-webgpu-wasi.patch
     ${CMAKE_CURRENT_SOURCE_DIR}/patches/0002-stream-ordered-tensor-loading.patch
     ${CMAKE_CURRENT_SOURCE_DIR}/patches/0003-ggml-webgpu-async-uploads.patch
-    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0004-64-bit-file-offsets.patch)
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0004-64-bit-file-offsets.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0006-webgpu-batch-param-uploads.patch)
 # Idempotent: detection uses the same tool and fuzz as application. (A patch that
 # landed with fuzz is not reverse-detectable by strict `git apply`, and
 # `patch --forward` then exits 1 on "previously applied", failing populate.)
