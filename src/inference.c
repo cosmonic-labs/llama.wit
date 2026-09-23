@@ -88,11 +88,29 @@ typedef struct {
     uint8_t  buf[STREAM_COOKIE_BUF_CAP];  // read-ahead cache
 } stream_cookie_t;
 
+// The Canonical ABI limits one stream read or write to Buffer.MAX_LENGTH items
+// (CanonicalABI.md: `class Buffer: MAX_LENGTH = 2**28 - 1`). The cap exists
+// because a stream event packs a 4-bit result with the progress count into one
+// 32-bit value (`packed_result = result | (progress << 4)`), so a count has to
+// fit in 28 bits. For stream<u8> an item is a byte. A host that enforces it
+// traps rather than reading less: wasmtime raises Trap::StreamOpTooBig from
+// ItemCount::new (component/concurrent/futures_and_streams.rs).
+//
+// The loader asks for a whole tensor at a time for any CPU-resident weight, so
+// without a clamp one read can be far over the limit (token_embd is ~680 MB on
+// a 24B at Q8_0 when it is not moved to the GPU). Clamping costs nothing:
+// cookie_read already loops until the request is satisfied, since a stream read
+// may return short for its own reasons.
+#define STREAM_MAX_READ ((1u << 28) - 1u)  // Buffer.MAX_LENGTH, the largest legal read
+
 // One pull of up to `amt` bytes, blocking on the waitable set if the stream has
 // nothing ready. Returns the byte count (0 = stream ended).
 static size_t stream_pull(stream_cookie_t * c, uint8_t * buf, size_t amt) {
     if (c->dropped) {
         return 0;
+    }
+    if (amt > STREAM_MAX_READ) {
+        amt = STREAM_MAX_READ;
     }
     provider_waitable_status_t st =
         exports_cosmonic_llama_cpp_api_stream_u8_read(c->reader, buf, amt);
