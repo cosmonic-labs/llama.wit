@@ -138,20 +138,37 @@ bool exports_cosmonic_llama_cpp_api_method_model_detokenize(
         provider_string_t * ret, provider_string_t * err) {
     size_t cap = tokens->len * 8 + 16;
     char * buf = (char *) malloc(cap);
-    int n = llama_detokenize(self->vocab, (const llama_token *) tokens->ptr, tokens->len,
-                             buf, cap, false, true);
-    if (n < 0) {
-        cap = (size_t) (-n);
-        buf = (char *) realloc(buf, cap);
-        n = llama_detokenize(self->vocab, (const llama_token *) tokens->ptr, tokens->len,
-                             buf, cap, false, true);
+    size_t len = 0;
+    // One piece at a time with lstrip 0, mirroring llama.cpp's own
+    // common_token_to_piece (what its server and CLI stream with).
+    // llama_detokenize is wrong here: it scopes the leading-space removal to the
+    // first token of each call, so a caller detokenizing one token at a time gets
+    // the space stripped off every piece. Only bites vocabs with add_space_prefix
+    // (SPM), which is why BPE callers never saw it. Forgoes llama_detokenize's
+    // clean-spaces pass, which cannot work per-token anyway.
+    for (size_t i = 0; i < tokens->len; i++) {
+        int n = llama_token_to_piece(self->vocab, (llama_token) tokens->ptr[i],
+                                     buf + len, (int32_t) (cap - len), 0, true);
+        if (n < 0) {
+            cap = len + (size_t) (-n) + 16;
+            char * grown = (char *) realloc(buf, cap);
+            if (!grown) {
+                free(buf);
+                set_err(err, "out of memory");
+                return false;
+            }
+            buf = grown;
+            n = llama_token_to_piece(self->vocab, (llama_token) tokens->ptr[i],
+                                     buf + len, (int32_t) (cap - len), 0, true);
+        }
+        if (n < 0) {
+            free(buf);
+            set_err(err, "failed to detokenize");
+            return false;
+        }
+        len += (size_t) n;
     }
-    if (n < 0) {
-        free(buf);
-        set_err(err, "failed to detokenize");
-        return false;
-    }
-    provider_string_dup_n(ret, buf, (size_t) n);
+    provider_string_dup_n(ret, buf, len);
     free(buf);
     return true;
 }
