@@ -143,3 +143,9 @@ world provider {
 world consumer {
     import api;
 }
+
+world test-harness {
+    import api;
+    export list-tests: func() -> list<string>;
+    export run-test: async func(name: string) -> result<_, string>;
+}
