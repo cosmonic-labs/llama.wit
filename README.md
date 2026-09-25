@@ -62,6 +62,11 @@ CI regenerates the bindings with wit-bindgen 0.59.0 (`WIT_BINDGEN_VERSION` in
 [the workflow](.github/workflows/ci.yml)) and fails if they differ from what is committed,
 so regenerate with that version.
 
+## Test
+```shell
+./tests/run.sh
+```
+
 ## Releases
 
 [CI](.github/workflows/ci.yml) builds the WebGPU component on every pull request and push to
