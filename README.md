@@ -47,10 +47,8 @@ the fetch): `-DWASI_WEBGPU_HEADERS_DIR=/path/... -DDAWN_WASI_WEBGPU_DIR=/path/..
 Override the fetched refs with `-DWASI_WEBGPU_HEADERS_TAG=...` / `-DDAWN_WASI_WEBGPU_TAG=...`.
 
 The resulting `llama-cpp.wasm` additionally imports `wasi:webgpu/webgpu@0.3.0-rc.2`,
-which the host must provide. This path is unproven
-end-to-end on wasip3; expect to shake out linker/componentization issues (e.g.
-duplicate `cabi_realloc` across the two `component-type` objects). If the patch
-ever fails to apply against a newer `LLAMA_GIT_TAG`, pin `-DLLAMA_GIT_TAG=b9886`
+which the host must provide. The test harness exercises this backend with Wasmtime.
+If the patch fails to apply against a newer `LLAMA_GIT_TAG`, pin `-DLLAMA_GIT_TAG=b9886`
 (the tag the WebGPU work was based on) or refresh the patch.
 
 ## Generate Bindings
@@ -61,6 +59,29 @@ cmake --build build --target regenerate-bindings
 CI regenerates the bindings with wit-bindgen 0.59.0 (`WIT_BINDGEN_VERSION` in
 [the workflow](.github/workflows/ci.yml)) and fails if they differ from what is committed,
 so regenerate with that version.
+
+## Test
+
+Install the `wasm32-wasip2` Rust target and `wac`, then build the component before
+running the harness. The host needs a WebGPU adapter.
+
+```shell
+rustup target add wasm32-wasip2
+./tests/run.sh
+```
+
+The default suite uses a 1.1 MiB model to check token bytes, context limits,
+logit bias, grammar constraints, embeddings, and prompt reuse against fresh inference.
+Models are cached in `tests/guest-dir/models`.
+
+```shell
+./tests/run.sh --live
+./tests/run.sh --live --filter prompt-reuse
+```
+
+The live suite also downloads Qwen 0.5B, Llama 1B, and BGE small. It checks repeated
+GPU model swaps, larger-model prompt reuse, and embedding dimensions and similarity.
+CI compiles the guest and tests the runner's failure reporting; GPU tests run locally.
 
 ## Releases
 

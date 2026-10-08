@@ -132,6 +132,14 @@ jobs:
             exit 1
           fi
 
+      - name: Check the test harness
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add wasm32-wasip2
+          cargo build --manifest-path tests/guest/Cargo.toml --target wasm32-wasip2 --release --locked
+          cargo test --manifest-path tests/runtime/Cargo.toml --locked
+
       - name: Embed provenance metadata
         # `wash oci push` maps these onto org.opencontainers.image.* annotations;
         # `source` is what links the GHCR package to this repository. Runs before

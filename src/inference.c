@@ -216,20 +216,31 @@ static bool model_detokenize(
     }
     size_t cap = tokens->len * 8 + 16;
     char * buf = (char *) malloc(cap);
-    int n = llama_detokenize(self->vocab, (const llama_token *) tokens->ptr, tokens->len,
-                             buf, cap, false, true);
-    if (n < 0) {
-        cap = (size_t) (-n);
-        buf = (char *) realloc(buf, cap);
-        n = llama_detokenize(self->vocab, (const llama_token *) tokens->ptr, tokens->len,
-                             buf, cap, false, true);
+    size_t len = 0;
+    // Preserve leading spaces when callers decode one token at a time.
+    for (size_t i = 0; i < tokens->len; i++) {
+        int n = llama_token_to_piece(self->vocab, (llama_token) tokens->ptr[i],
+                                     buf + len, (int32_t) (cap - len), 0, true);
+        if (n < 0) {
+            cap = len + (size_t) (-n) + 16;
+            char * grown = (char *) realloc(buf, cap);
+            if (!grown) {
+                free(buf);
+                set_err(err, "out of memory");
+                return false;
+            }
+            buf = grown;
+            n = llama_token_to_piece(self->vocab, (llama_token) tokens->ptr[i],
+                                     buf + len, (int32_t) (cap - len), 0, true);
+        }
+        if (n < 0) {
+            free(buf);
+            set_err(err, "failed to detokenize");
+            return false;
+        }
+        len += (size_t) n;
     }
-    if (n < 0) {
-        free(buf);
-        set_err(err, "failed to detokenize");
-        return false;
-    }
-    string_from_bytes(buf, (size_t) n, ret);
+    string_from_bytes(buf, len, ret);
     free(buf);
     return true;
 }
@@ -358,6 +369,10 @@ uint32_t exports_cosmonic_llama_cpp_api_method_model_n_embd(model_t * self) {
 // --- context ---
 
 static bool append_tokens(context_t * self, const uint32_t * toks, size_t count, provider_string_t * err) {
+    if (!tokens_in_range(self->model, toks, count)) {
+        set_err(err, "token out of range");
+        return false;
+    }
     // Checked up front: a decode that overflows fails partway, leaving the
     // chunks before it in the KV cache.
     uint32_t n_ctx = llama_n_ctx(self->ctx);
