@@ -1,4 +1,4 @@
-package cosmonic:llama-cpp@0.5.0;
+package cosmonic:llama-cpp@0.6.0;
 
 /// LLM inference over llama.cpp.
 ///
@@ -22,14 +22,18 @@ interface api {
         /// Max tokens processed per decode step; caps the chunk size used
         /// when feeding long prompts. Defaults to 512.
         n-batch: u32,
+        /// Create the context for `embed` rather than for generation. An
+        /// input to `embed` must then fit in one batch of `n-batch` tokens.
+        embeddings: bool,
     }
 
     /// Sampling configuration for `sampler`.
     ///
-    /// Samplers are applied as a chain (top-k, then top-p, then min-p, then
-    /// temperature) followed by a seeded random pick, matching llama.cpp's
-    /// conventions. `temp <= 0` selects greedy sampling and ignores every
-    /// other field.
+    /// Samplers are applied as a chain matching llama.cpp's conventions: the
+    /// grammar, logit bias, then repetition penalties, then top-k, top-p, min-p
+    /// and temperature, followed by a seeded random pick. `temp <= 0` replaces
+    /// the truncation, temperature and random pick with a greedy pick; the
+    /// logit bias and penalties still apply.
     record sampler-params {
         /// Temperature. Higher = more random; `<= 0` = greedy (deterministic).
         temp: f32,
@@ -42,7 +46,31 @@ interface api {
         /// `0` disables.
         min-p: f32,
         /// Seed for the random pick, for reproducible sampling.
-        seed: u64,
+        /// `4294967295` picks a random seed.
+        seed: u32,
+        /// How many of the most recently sampled tokens the penalties look at.
+        /// `0` disables every penalty. The window is allocated up front, so
+        /// keep it within the context size.
+        penalty-last-n: u32,
+        /// Divides the logits of tokens already in the window. `1` disables.
+        repeat-penalty: f32,
+        /// Subtracted once per occurrence of a token in the window. `0`
+        /// disables.
+        frequency-penalty: f32,
+        /// Subtracted once from any token present in the window. `0` disables.
+        presence-penalty: f32,
+        /// Added to the logits of specific tokens before sampling. A large
+        /// negative bias bans a token.
+        logit-bias: list<logit-bias>,
+        /// A GBNF grammar, with a `root` rule, that the output must match.
+        /// End of generation is only sampled once the grammar is complete.
+        /// `json-schema-to-grammar` makes one from a JSON Schema.
+        grammar: option<string>,
+    }
+
+    record logit-bias {
+        token: u32,
+        bias: f32,
     }
 
     /// One turn of a conversation, for `model.apply-chat-template`.
@@ -68,7 +96,18 @@ interface api {
         tokenize: func(text: string, add-special: bool) -> result<list<u32>, string>;
 
         /// Convert tokens back to text.
+        ///
+        /// Bytes that are not valid UTF-8, such as a character cut off at
+        /// the end of `tokens`, come back as U+FFFD. To stream text a token at
+        /// a time, collect `token-to-piece` bytes instead.
         detokenize: func(tokens: list<u32>) -> result<string, string>;
+
+        /// The raw bytes one token stands for.
+        ///
+        /// A token may hold only part of a UTF-8 character, so the bytes are
+        /// not always valid text on their own. With `special`, control tokens
+        /// render as their text instead of as nothing.
+        token-to-piece: func(token: u32, special: bool) -> result<list<u8>, string>;
 
         /// Whether `token` ends generation (end-of-sequence, end-of-turn, ...).
         is-eog: func(token: u32) -> bool;
@@ -87,6 +126,9 @@ interface api {
 
         /// Context length the model was trained with.
         n-ctx-train: func() -> u32;
+
+        /// Length of the vectors `context.embed` returns.
+        n-embd: func() -> u32;
     }
 
     /// Inference state over a model: holds the KV cache, so text fed via
@@ -100,7 +142,8 @@ interface api {
 
         /// Tokenize `text` and feed it into the context (grows the KV cache),
         /// without generating. Start tokens are added automatically when the
-        /// context is empty.
+        /// context is empty. Input that would overflow the context window is
+        /// refused before any of it is decoded.
         append: async func(text: string) -> result<_, string>;
 
         /// Same, for pre-tokenized input (see `model.tokenize`). Useful to
@@ -109,11 +152,28 @@ interface api {
         /// a progress indicator between them).
         append-tokens: async func(tokens: list<u32>) -> result<_, string>;
 
+        /// Embeds `tokens` as one sequence and returns its vector, which is not
+        /// normalized. Uses the model's pooling, or the mean of the token
+        /// embeddings for a model without one. Needs a context created with
+        /// `embeddings`; clears the context first.
+        embed: async func(tokens: list<u32>) -> result<list<f32>, string>;
+
         /// Number of tokens in the context so far (appended + generated).
         n-past: func() -> u32;
 
         /// Reset to an empty context (clears the KV cache).
         clear: func();
+
+        /// Keeps the first `n` tokens and forgets the rest, so a prompt that
+        /// shares a prefix with what the context holds only has to append the
+        /// part that differs. Append at least one token before sampling again.
+        ///
+        /// Fails, leaving the context empty, when `n` is more than the context
+        /// holds or the model's memory cannot give back the prefix: recurrent
+        /// models cannot forget tokens from the end, and sliding-window
+        /// attention may already have dropped tokens the prefix needs. Append
+        /// the whole prompt then.
+        truncate: func(n: u32) -> result<_, string>;
     }
 
     /// A sampler chain (mirrors `llama_sampler_chain`). Generation is a
@@ -121,17 +181,24 @@ interface api {
     ///
     ///   let tok = sampler.sample(ctx);        // pick from last logits
     ///   if model.is-eog(tok) { done }
-    ///   text += model.detokenize([tok]);
+    ///   bytes += model.token-to-piece(tok, false);
     ///   ctx.append-tokens([tok]);             // decode; makes next logits
     ///
     /// The context must be non-empty (append a prompt first).
     resource sampler {
-        /// `none` = greedy sampling.
-        constructor(params: option<sampler-params>);
+        /// `none` = greedy sampling. The model sizes the logit bias and
+        /// compiles the grammar; the sampler does not keep a reference to it.
+        /// Fails if the grammar does not parse.
+        create: static func(model: borrow<model>, params: option<sampler-params>) -> result<sampler, string>;
 
         /// Sample one token from the context's current logits.
         sample: async func(ctx: borrow<context>) -> u32;
     }
+
+    /// Converts a JSON Schema to a GBNF grammar for `sampler-params.grammar`,
+    /// with llama.cpp's own converter. Fails if the schema is not valid JSON
+    /// or uses something the converter does not support.
+    json-schema-to-grammar: func(schema: string) -> result<string, string>;
 }
 
 /// Implemented by the llama-cpp-wit component.

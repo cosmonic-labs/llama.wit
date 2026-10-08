@@ -19,22 +19,23 @@ pub async fn run() -> Result<(), String> {
     let context = Context::create(&model, None).await?;
     context.append(PROMPT.to_string()).await?;
 
-    let sampler = Sampler::new(None);
+    let sampler = Sampler::create(&model, None)?;
 
-    let mut generated = String::new();
+    let mut generated = Vec::new();
     const MAX_NEW_TOKENS: u32 = 16;
     for _ in 0..MAX_NEW_TOKENS {
         let token = sampler.sample(&context).await;
         if model.is_eog(token) {
             break;
         }
-        generated.push_str(&model.detokenize(&[token])?);
+        generated.extend(model.token_to_piece(token, false)?);
         context.append_tokens(vec![token]).await?;
     }
 
     if generated.is_empty() {
         return Err("generated no tokens".to_string());
     }
+    let generated = String::from_utf8_lossy(&generated);
     println!("smoke: {PROMPT}{generated}");
     Ok(())
 }

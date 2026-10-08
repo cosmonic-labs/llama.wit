@@ -7,7 +7,7 @@ edition = "2024"
 anyhow = "1"
 wasmtime = "47.0"
 wasmtime-wasi = { version = "47.0", features = ["p3"] }
-wasmtime-wasi-http = { version = "47.0", features = ["p3"] }
+wasmtime-wasi-http = "47.0"
 wasi-webgpu-wasmtime = "0.2.0"
 clap = { version = "4.6.7", features = ["derive"] }
 log = "0.4.34"

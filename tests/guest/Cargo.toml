@@ -9,3 +9,4 @@ crate-type = ["cdylib"]
 [dependencies]
 wit-bindgen = { version = "0.62.0", features = ["async"] }
 wstd = { version = "0.6.8" }
+serde_json = "1"

@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use clap::Parser;
 use colored::Colorize;
 use std::sync::Arc;
@@ -13,8 +15,7 @@ use wasmtime::{
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
     WasiHttpCtx,
-    p2::{WasiHttpCtxView as P2WasiHttpCtxView, WasiHttpView as P2WasiHttpView},
-    p3::{WasiHttpCtxView, WasiHttpView},
+    p2::{WasiHttpCtxView, WasiHttpView},
 };
 
 #[derive(clap::Parser, Debug)]
@@ -22,6 +23,12 @@ struct RuntimeArgs {
     /// Path to the component
     #[arg(long, short)]
     path: String,
+    /// Include tests that download larger models.
+    #[arg(long)]
+    live: bool,
+    /// Run tests whose names contain this text.
+    #[arg(long)]
+    filter: Option<String>,
 }
 
 wasmtime::component::bindgen!({
@@ -100,16 +107,6 @@ impl WasiHttpView for WorkloadState {
     }
 }
 
-impl P2WasiHttpView for WorkloadState {
-    fn http(&mut self) -> P2WasiHttpCtxView<'_> {
-        P2WasiHttpCtxView {
-            ctx: &mut self.wasi_http_ctx,
-            table: &mut self.table,
-            hooks: Default::default(),
-        }
-    }
-}
-
 impl WasiWebGpuCtxView for WorkloadState {
     fn webgpu_ctx(&mut self) -> WasiWebGpuCtx<'_> {
         WasiWebGpuCtx {
@@ -135,11 +132,10 @@ async fn main() -> anyhow::Result<()> {
     let engine = Engine::new(&config)?;
 
     let mut linker: Linker<WorkloadState> = Linker::new(&engine);
-    // p2 for the Rust and p3 for the C
+    // The Rust guest uses WASI 0.2; the C engine uses 0.3.
     wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
     wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)?;
     wasmtime_wasi::p3::add_to_linker(&mut linker)?;
-    wasmtime_wasi_http::p3::add_to_linker(&mut linker)?;
     wasi_webgpu_wasmtime::add_to_linker(&mut linker)?;
 
     let mut store = Store::new(&engine, host_state.add_workload());
@@ -153,24 +149,35 @@ async fn main() -> anyhow::Result<()> {
         .func_list_tests()
         .call_async(&mut store, ())
         .await?
-        .0;
+        .0
+        .into_iter()
+        .filter(|name| args.live || !name.starts_with("live/"))
+        .filter(|name| {
+            args.filter
+                .as_ref()
+                .is_none_or(|filter| name.contains(filter))
+        })
+        .collect::<Vec<_>>();
+    anyhow::ensure!(!tests.is_empty(), "no tests matched");
     println!("running {} tests: {}", tests.len(), tests.join(", "));
 
     let mut success = 0u32;
     let mut fail = 0u32;
 
     for test in &tests {
+        println!("test {test} ...");
         let result = component
             .func_run_test()
             .call_async(&mut store, (test.to_owned(),))
             .await;
-        match result {
-            Ok(_) => {
+        match test_outcome(result) {
+            Ok(()) => {
                 success += 1;
+                println!("test {test} ... ok");
             }
             Err(e) => {
                 fail += 1;
-                eprintln!("{e}");
+                eprintln!("test {test} ... FAILED: {e}");
             }
         }
     }
@@ -188,4 +195,28 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn test_outcome<E: std::fmt::Display>(
+    result: Result<(Result<(), String>,), E>,
+) -> Result<(), String> {
+    match result {
+        Ok((outcome,)) => outcome,
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_outcome;
+
+    #[test]
+    fn guest_failures_and_traps_fail_the_test() {
+        assert_eq!(test_outcome::<&str>(Ok((Ok(()),))), Ok(()));
+        assert_eq!(
+            test_outcome::<&str>(Ok((Err("guest failed".into()),))),
+            Err("guest failed".into())
+        );
+        assert_eq!(test_outcome(Err("trap")), Err("trap".into()));
+    }
 }

@@ -1132,6 +1132,7 @@ dependencies = [
 name = "guest"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "wit-bindgen 0.62.0",
  "wstd",
 ]
@@ -3203,7 +3204,6 @@ dependencies = [
  "rustls",
  "tokio",
  "tokio-rustls",
- "tokio-util",
  "tracing",
  "wasmtime",
  "wasmtime-wasi",

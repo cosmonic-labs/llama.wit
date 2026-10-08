@@ -20,6 +20,21 @@ pub const STORIES_260K: HfModel = HfModel {
     file: "stories260K.gguf",
 };
 
+pub const QWEN: HfModel = HfModel {
+    url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    file: "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+};
+
+pub const LLAMA: HfModel = HfModel {
+    url: "https://huggingface.co/unsloth/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+    file: "Llama-3.2-1B-Instruct-Q4_K_M.gguf",
+};
+
+pub const BGE: HfModel = HfModel {
+    url: "https://huggingface.co/CompendiumLabs/bge-small-en-v1.5-gguf/resolve/main/bge-small-en-v1.5-q8_0.gguf",
+    file: "bge-small-en-v1.5-q8_0.gguf",
+};
+
 pub fn load(model: &HfModel) -> Result<Vec<u8>, String> {
     download(model).map_err(|e| format!("{}: {e}", model.file))
 }
