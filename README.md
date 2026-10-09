@@ -13,7 +13,7 @@ cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/wasip3.toolchain.cmake -DCMAKE_BUILD
 cmake --build build
 ```
 
-Output at `build/llama.wasm`
+Output at `build/llama-cpp.wasm`.
 
 ## Generate Bindings
 ```shell

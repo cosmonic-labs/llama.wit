@@ -1,5 +1,4 @@
-// Implements cosmonic:llama-cpp/api (see wit/llama.wit) on top of llama.cpp,
-// against the wit-bindgen C bindings (provider.h). Pure C over llama.h's C API.
+// cosmonic:llama-cpp/api (wit/llama.wit) over llama.cpp's C API
 #include "provider.h"
 #include "llama.h"
 
@@ -8,16 +7,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// wasi-sdk wasip3 workaround: _initialize runs constructors before the
-// cooperative-threading stack pointer is set, so any ctor that touches the stack
-// traps. A highest-priority constructor runs the stack init first. Weak so a
-// wasip2 build still links. TODO: remove once wasi-sdk fixes reactor init.
-extern void __wasm_init_task(void) __attribute__((weak));
-static void ensure_stack(void) { if (__wasm_init_task) { __wasm_init_task(); } }
-__attribute__((constructor(101)))
-static void wasip3_init_stack(void) { ensure_stack(); }
-
-// Short aliases for the (verbose) wit-bindgen resource-rep types.
 typedef exports_cosmonic_llama_cpp_api_model_t   model_t;
 typedef exports_cosmonic_llama_cpp_api_context_t context_t;
 typedef exports_cosmonic_llama_cpp_api_sampler_t sampler_t;
@@ -41,22 +30,18 @@ static void set_err(provider_string_t * err, const char * msg) {
     provider_string_dup(err, msg);
 }
 
-// No-op log sink. On wasip3, writing to stderr is an async WASI call that a sync
-// export can't block on, so the provider must never log; the consumer owns I/O.
+// Sync exports can't block on wasip3's async stderr, so never log
 static void log_cb(enum ggml_log_level level, const char * text, void * user) {
     (void) level; (void) text; (void) user;
 }
 
 // --- model ---
 
-bool exports_cosmonic_llama_cpp_api_constructor_model(
+static bool model_create(
         provider_list_u8_t * data,
         exports_cosmonic_llama_cpp_api_model_params_t * maybe_params,
         exports_cosmonic_llama_cpp_api_own_model_t * ret,
         provider_string_t * err) {
-    // Route llama + ggml logging to a no-op sink so the provider never writes to
-    // stderr (a WASI call). The statically-linked CPU backend registers itself, so
-    // we do NOT call ggml_backend_load_all() (which scans the filesystem).
     static bool inited = false;
     if (!inited) {
         llama_log_set(log_cb, NULL);
@@ -68,8 +53,7 @@ bool exports_cosmonic_llama_cpp_api_constructor_model(
     if (maybe_params) {
         mp.n_gpu_layers = maybe_params->n_gpu_layers;
     }
-    // Load from the in-memory bytes via fmemopen -> no filesystem I/O, so this
-    // sync export never blocks on wasip3's async wasi:filesystem.
+    // fmemopen avoids wasip3's async wasi:filesystem
     FILE * f = fmemopen(data->ptr, data->len, "rb");
     if (!f) {
         set_err(err, "fmemopen failed");
@@ -88,8 +72,22 @@ bool exports_cosmonic_llama_cpp_api_constructor_model(
     return true;
 }
 
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(
+        provider_list_u8_t * data,
+        exports_cosmonic_llama_cpp_api_model_params_t * maybe_params) {
+    exports_cosmonic_llama_cpp_api_result_own_model_string_t ret;
+    ret.is_err = !model_create(data, maybe_params, &ret.val.ok, &ret.val.err);
+    exports_cosmonic_llama_cpp_api_static_model_create_return(ret);
+    return PROVIDER_CALLBACK_CODE_EXIT;
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_static_model_create never returns yield/wait
+    abort();
+}
+
 void exports_cosmonic_llama_cpp_api_model_destructor(model_t * rep) {
-    ensure_stack();  // wasip3: resource-drop callbacks run with SP=0; set it first
     llama_model_free(rep->model);
     free(rep);
 }
@@ -147,7 +145,7 @@ bool exports_cosmonic_llama_cpp_api_method_model_apply_chat_template(
         return false;
     }
 
-    // Null-terminated copies for llama_chat_message (role/content are const char*).
+    // llama_chat_message needs null-terminated strings
     size_t nmsg = messages->len;
     struct llama_chat_message * msgs = (struct llama_chat_message *) malloc(nmsg * sizeof(*msgs));
     for (size_t i = 0; i < nmsg; i++) {
@@ -214,17 +212,13 @@ static bool append_tokens(context_t * self, const uint32_t * toks, size_t count,
     return true;
 }
 
-bool exports_cosmonic_llama_cpp_api_constructor_context(
+static bool context_create(
         model_t * model, exports_cosmonic_llama_cpp_api_context_params_t * maybe_params,
         exports_cosmonic_llama_cpp_api_own_context_t * ret, provider_string_t * err) {
     struct llama_context_params cp = llama_context_default_params();
-    // Treat 0 as "unset": the WIT records these as plain u32 (not option) but documents
-    // per-field defaults, and n_batch == 0 would make append-tokens loop forever.
+    // 0 means default, n_batch == 0 would loop forever in append_tokens
     cp.n_ctx   = (maybe_params && maybe_params->n_ctx)   ? maybe_params->n_ctx   : 4096;
     cp.n_batch = (maybe_params && maybe_params->n_batch) ? maybe_params->n_batch : 512;
-    // WASI is single-threaded (pthread stubs); force ggml to compute on one thread.
-    cp.n_threads       = 1;
-    cp.n_threads_batch = 1;
     struct llama_context * c = llama_init_from_model(model->model, cp);
     if (!c) {
         set_err(err, "failed to create context");
@@ -239,13 +233,27 @@ bool exports_cosmonic_llama_cpp_api_constructor_context(
     return true;
 }
 
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_context_create(
+        exports_cosmonic_llama_cpp_api_borrow_model_t model,
+        exports_cosmonic_llama_cpp_api_context_params_t * maybe_params) {
+    exports_cosmonic_llama_cpp_api_result_own_context_string_t ret;
+    ret.is_err = !context_create(model, maybe_params, &ret.val.ok, &ret.val.err);
+    exports_cosmonic_llama_cpp_api_static_context_create_return(ret);
+    return PROVIDER_CALLBACK_CODE_EXIT;
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_context_create_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_static_context_create never returns yield/wait
+    abort();
+}
+
 void exports_cosmonic_llama_cpp_api_context_destructor(context_t * rep) {
-    ensure_stack();  // wasip3: resource-drop callbacks run with SP=0; set it first
     llama_free(rep->ctx);
     free(rep);
 }
 
-bool exports_cosmonic_llama_cpp_api_method_context_append(
+static bool context_append(
         context_t * self, provider_string_t * text, provider_string_t * err) {
     const char * t = (const char *) text->ptr;
     int32_t len = (int32_t) text->len;
@@ -262,9 +270,32 @@ bool exports_cosmonic_llama_cpp_api_method_context_append(
     return ok;
 }
 
-bool exports_cosmonic_llama_cpp_api_method_context_append_tokens(
-        context_t * self, provider_list_u32_t * tokens, provider_string_t * err) {
-    return append_tokens(self, tokens->ptr, tokens->len, err);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append(
+        context_t * self, provider_string_t * text) {
+    exports_cosmonic_llama_cpp_api_result_void_string_t ret;
+    ret.is_err = !context_append(self, text, &ret.val.err);
+    exports_cosmonic_llama_cpp_api_method_context_append_return(ret);
+    return PROVIDER_CALLBACK_CODE_EXIT;
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_method_context_append never returns yield/wait
+    abort();
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_tokens(
+        context_t * self, provider_list_u32_t * tokens) {
+    exports_cosmonic_llama_cpp_api_result_void_string_t ret;
+    ret.is_err = !append_tokens(self, tokens->ptr, tokens->len, &ret.val.err);
+    exports_cosmonic_llama_cpp_api_method_context_append_tokens_return(ret);
+    return PROVIDER_CALLBACK_CODE_EXIT;
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_tokens_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_method_context_append_tokens never returns yield/wait
+    abort();
 }
 
 uint32_t exports_cosmonic_llama_cpp_api_method_context_n_past(context_t * self) {
@@ -295,17 +326,24 @@ exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_cons
 }
 
 void exports_cosmonic_llama_cpp_api_sampler_destructor(sampler_t * rep) {
-    ensure_stack();  // wasip3: resource-drop callbacks run with SP=0; set it first
     llama_sampler_free(rep->smpl);
     free(rep);
 }
 
-uint32_t exports_cosmonic_llama_cpp_api_method_sampler_sample(sampler_t * self, context_t * ctx) {
-    // No error channel (returns u32): an empty context has no logits at index -1,
-    // so fail loudly instead of sampling garbage. Caller must append a prompt first.
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_sampler_sample(
+        sampler_t * self, context_t * ctx) {
+    // No error channel, and an empty context has no logits to sample
     if (ctx->past == 0) {
         fputs("sampler.sample: context is empty (append a prompt first)\n", stderr);
         abort();
     }
-    return llama_sampler_sample(self->smpl, ctx->ctx, -1);
+    exports_cosmonic_llama_cpp_api_method_sampler_sample_return(
+        llama_sampler_sample(self->smpl, ctx->ctx, -1));
+    return PROVIDER_CALLBACK_CODE_EXIT;
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_sampler_sample_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_method_sampler_sample never returns yield/wait
+    abort();
 }
