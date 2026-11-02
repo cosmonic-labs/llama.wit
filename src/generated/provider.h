@@ -81,84 +81,45 @@ void provider_thread_yield(void);
 
 
 
-// Options for loading a model. Omitted params (`option::none`) use
-// llama.cpp defaults.
+// `llama_model_params`. Omitted params use llama.cpp defaults.
 typedef struct exports_cosmonic_llama_cpp_api_model_params_t {
-  // Number of transformer layers to offload to a GPU backend.
-  // Ignored when no GPU backend is compiled in.
-  uint32_t   n_gpu_layers;
+  // Number of layers to store in VRAM; negative means all.
+  int32_t   n_gpu_layers;
 } exports_cosmonic_llama_cpp_api_model_params_t;
 
-// Options for creating a context.
+// Options for creating a context (`llama_context_params`). Omitted params
+// use llama.cpp defaults.
 typedef struct exports_cosmonic_llama_cpp_api_context_params_t {
-  // Size of the context window in tokens (prompt + generation).
-  // Defaults to 4096. Values beyond `model.n-ctx-train` degrade quality.
+  // Size of the context window in tokens (prompt + generation). `0`
+  // uses `model.n-ctx-train`.
   uint32_t   n_ctx;
-  // Max tokens processed per decode step; caps the chunk size used
-  // when feeding long prompts. Defaults to 512.
+  // Max tokens per `decode` call. Must not be `0`.
   uint32_t   n_batch;
-  // Create the context for `embed` rather than for generation. An
-  // input to `embed` must then fit in one batch of `n-batch` tokens.
+  // Max tokens per micro-batch inside a `decode`. Non-causal models,
+  // such as most embedding models, need a whole input in one, so set it
+  // to `n-batch` for them. `0` uses `n-batch`.
+  uint32_t   n_ubatch;
+  // Output embeddings instead of logits; see `context.get-embeddings-ith`.
   bool   embeddings;
 } exports_cosmonic_llama_cpp_api_context_params_t;
 
+// `llama_pooling_type`.
+typedef uint8_t exports_cosmonic_llama_cpp_api_pooling_type_t;
+
+#define EXPORTS_COSMONIC_LLAMA_CPP_API_POOLING_TYPE_UNSPECIFIED 0
+#define EXPORTS_COSMONIC_LLAMA_CPP_API_POOLING_TYPE_NONE 1
+#define EXPORTS_COSMONIC_LLAMA_CPP_API_POOLING_TYPE_MEAN 2
+#define EXPORTS_COSMONIC_LLAMA_CPP_API_POOLING_TYPE_CLS 3
+#define EXPORTS_COSMONIC_LLAMA_CPP_API_POOLING_TYPE_LAST 4
+#define EXPORTS_COSMONIC_LLAMA_CPP_API_POOLING_TYPE_RANK 5
+
+// `llama_logit_bias`.
 typedef struct exports_cosmonic_llama_cpp_api_logit_bias_t {
   uint32_t   token;
   float   bias;
 } exports_cosmonic_llama_cpp_api_logit_bias_t;
 
-typedef struct {
-  exports_cosmonic_llama_cpp_api_logit_bias_t *ptr;
-  size_t len;
-} exports_cosmonic_llama_cpp_api_list_logit_bias_t;
-
-typedef struct {
-  bool is_some;
-  provider_string_t val;
-} provider_option_string_t;
-
-// Sampling configuration for `sampler`.
-// 
-// Samplers are applied as a chain matching llama.cpp's conventions: the
-// grammar, logit bias, then repetition penalties, then top-k, top-p, min-p
-// and temperature, followed by a seeded random pick. `temp <= 0` replaces
-// the truncation, temperature and random pick with a greedy pick; the
-// logit bias and penalties still apply.
-typedef struct exports_cosmonic_llama_cpp_api_sampler_params_t {
-  // Temperature. Higher = more random; `<= 0` = greedy (deterministic).
-  float   temp;
-  // Keep only the `top-k` most likely tokens. `0` disables.
-  uint32_t   top_k;
-  // Nucleus sampling: keep tokens covering this probability mass.
-  // `>= 1` disables.
-  float   top_p;
-  // Drop tokens below `min-p` times the top token's probability.
-  // `0` disables.
-  float   min_p;
-  // Seed for the random pick, for reproducible sampling.
-  // `4294967295` picks a random seed.
-  uint32_t   seed;
-  // How many of the most recently sampled tokens the penalties look at.
-  // `0` disables every penalty. The window is allocated up front, so
-  // keep it within the context size.
-  uint32_t   penalty_last_n;
-  // Divides the logits of tokens already in the window. `1` disables.
-  float   repeat_penalty;
-  // Subtracted once per occurrence of a token in the window. `0`
-  // disables.
-  float   frequency_penalty;
-  // Subtracted once from any token present in the window. `0` disables.
-  float   presence_penalty;
-  // Added to the logits of specific tokens before sampling. A large
-  // negative bias bans a token.
-  exports_cosmonic_llama_cpp_api_list_logit_bias_t   logit_bias;
-  // A GBNF grammar, with a `root` rule, that the output must match.
-  // End of generation is only sampled once the grammar is complete.
-  // `json-schema-to-grammar` makes one from a JSON Schema.
-  provider_option_string_t   grammar;
-} exports_cosmonic_llama_cpp_api_sampler_params_t;
-
-// One turn of a conversation, for `model.apply-chat-template`.
+// `llama_chat_message`.
 typedef struct exports_cosmonic_llama_cpp_api_chat_message_t {
   // Typically "system", "user", or "assistant".
   provider_string_t   role;
@@ -188,6 +149,19 @@ typedef struct exports_cosmonic_llama_cpp_api_own_sampler_t {
 typedef struct exports_cosmonic_llama_cpp_api_sampler_t exports_cosmonic_llama_cpp_api_sampler_t;
 
 typedef exports_cosmonic_llama_cpp_api_sampler_t* exports_cosmonic_llama_cpp_api_borrow_sampler_t;
+
+typedef struct {
+  exports_cosmonic_llama_cpp_api_chat_message_t *ptr;
+  size_t len;
+} exports_cosmonic_llama_cpp_api_list_chat_message_t;
+
+typedef struct {
+  bool is_err;
+  union {
+    provider_string_t ok;
+    provider_string_t err;
+  } val;
+} exports_cosmonic_llama_cpp_api_result_string_string_t;
 
 typedef struct {
   uint8_t *ptr;
@@ -223,23 +197,15 @@ typedef struct {
 typedef struct {
   bool is_err;
   union {
-    provider_string_t ok;
-    provider_string_t err;
-  } val;
-} exports_cosmonic_llama_cpp_api_result_string_string_t;
-
-typedef struct {
-  bool is_err;
-  union {
     provider_list_u8_t ok;
     provider_string_t err;
   } val;
 } exports_cosmonic_llama_cpp_api_result_list_u8_string_t;
 
 typedef struct {
-  exports_cosmonic_llama_cpp_api_chat_message_t *ptr;
-  size_t len;
-} exports_cosmonic_llama_cpp_api_list_chat_message_t;
+  bool is_some;
+  provider_string_t val;
+} provider_option_string_t;
 
 typedef struct {
   bool is_some;
@@ -257,9 +223,9 @@ typedef struct {
 typedef struct {
   bool is_err;
   union {
-    provider_string_t err;
+    int32_t err;
   } val;
-} exports_cosmonic_llama_cpp_api_result_void_string_t;
+} exports_cosmonic_llama_cpp_api_result_void_s32_t;
 
 typedef struct {
   float *ptr;
@@ -267,17 +233,21 @@ typedef struct {
 } provider_list_f32_t;
 
 typedef struct {
-  bool is_err;
-  union {
-    provider_list_f32_t ok;
-    provider_string_t err;
-  } val;
-} exports_cosmonic_llama_cpp_api_result_list_f32_string_t;
+  bool is_some;
+  provider_list_f32_t val;
+} provider_option_list_f32_t;
 
 typedef struct {
-  bool is_some;
-  exports_cosmonic_llama_cpp_api_sampler_params_t val;
-} exports_cosmonic_llama_cpp_api_option_sampler_params_t;
+  bool is_err;
+  union {
+    provider_string_t err;
+  } val;
+} exports_cosmonic_llama_cpp_api_result_void_string_t;
+
+typedef struct {
+  exports_cosmonic_llama_cpp_api_logit_bias_t *ptr;
+  size_t len;
+} exports_cosmonic_llama_cpp_api_list_logit_bias_t;
 
 typedef struct {
   bool is_err;
@@ -287,40 +257,58 @@ typedef struct {
   } val;
 } exports_cosmonic_llama_cpp_api_result_own_sampler_string_t;
 
-// Exported Functions from `cosmonic:llama-cpp/api@0.6.0`
+typedef struct {
+  bool is_err;
+  union {
+    uint32_t ok;
+    provider_string_t err;
+  } val;
+} exports_cosmonic_llama_cpp_api_result_u32_string_t;
+
+// Exported Functions from `cosmonic:llama-cpp/api@0.7.0`
+bool exports_cosmonic_llama_cpp_api_chat_apply_template(provider_string_t *tmpl, exports_cosmonic_llama_cpp_api_list_chat_message_t *chat, bool add_ass, provider_string_t *ret, provider_string_t *err);
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(provider_list_u8_t *data, exports_cosmonic_llama_cpp_api_model_params_t *maybe_params);
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create_callback(provider_event_t *event);
-bool exports_cosmonic_llama_cpp_api_method_model_tokenize(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_string_t *text, bool add_special, provider_list_u32_t *ret, provider_string_t *err);
-bool exports_cosmonic_llama_cpp_api_method_model_detokenize(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_list_u32_t *tokens, provider_string_t *ret, provider_string_t *err);
-bool exports_cosmonic_llama_cpp_api_method_model_token_to_piece(exports_cosmonic_llama_cpp_api_borrow_model_t self, uint32_t token, bool special, provider_list_u8_t *ret, provider_string_t *err);
+bool exports_cosmonic_llama_cpp_api_method_model_tokenize(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_string_t *text, bool add_special, bool parse_special, provider_list_u32_t *ret, provider_string_t *err);
+bool exports_cosmonic_llama_cpp_api_method_model_detokenize(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_list_u32_t *tokens, bool remove_special, bool unparse_special, provider_string_t *ret, provider_string_t *err);
+bool exports_cosmonic_llama_cpp_api_method_model_token_to_piece(exports_cosmonic_llama_cpp_api_borrow_model_t self, uint32_t token, int32_t lstrip, bool special, provider_list_u8_t *ret, provider_string_t *err);
 bool exports_cosmonic_llama_cpp_api_method_model_is_eog(exports_cosmonic_llama_cpp_api_borrow_model_t self, uint32_t token);
-bool exports_cosmonic_llama_cpp_api_method_model_apply_chat_template(exports_cosmonic_llama_cpp_api_borrow_model_t self, exports_cosmonic_llama_cpp_api_list_chat_message_t *messages, bool add_assistant, provider_string_t *ret, provider_string_t *err);
+bool exports_cosmonic_llama_cpp_api_method_model_chat_template(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_string_t *maybe_name, provider_string_t *ret);
 void exports_cosmonic_llama_cpp_api_method_model_description(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_string_t *ret);
 uint32_t exports_cosmonic_llama_cpp_api_method_model_n_ctx_train(exports_cosmonic_llama_cpp_api_borrow_model_t self);
-uint32_t exports_cosmonic_llama_cpp_api_method_model_n_embd(exports_cosmonic_llama_cpp_api_borrow_model_t self);
+uint32_t exports_cosmonic_llama_cpp_api_method_model_n_embd_out(exports_cosmonic_llama_cpp_api_borrow_model_t self);
+uint32_t exports_cosmonic_llama_cpp_api_method_model_n_cls_out(exports_cosmonic_llama_cpp_api_borrow_model_t self);
+uint32_t exports_cosmonic_llama_cpp_api_method_model_n_vocab(exports_cosmonic_llama_cpp_api_borrow_model_t self);
+uint32_t exports_cosmonic_llama_cpp_api_method_model_n_swa(exports_cosmonic_llama_cpp_api_borrow_model_t self);
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_context_create(exports_cosmonic_llama_cpp_api_borrow_model_t model, exports_cosmonic_llama_cpp_api_context_params_t *maybe_params);
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_context_create_callback(provider_event_t *event);
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append(exports_cosmonic_llama_cpp_api_borrow_context_t self, provider_string_t *text);
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_callback(provider_event_t *event);
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_tokens(exports_cosmonic_llama_cpp_api_borrow_context_t self, provider_list_u32_t *tokens);
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_tokens_callback(provider_event_t *event);
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_embed(exports_cosmonic_llama_cpp_api_borrow_context_t self, provider_list_u32_t *tokens);
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_embed_callback(provider_event_t *event);
-uint32_t exports_cosmonic_llama_cpp_api_method_context_n_past(exports_cosmonic_llama_cpp_api_borrow_context_t self);
-void exports_cosmonic_llama_cpp_api_method_context_clear(exports_cosmonic_llama_cpp_api_borrow_context_t self);
-bool exports_cosmonic_llama_cpp_api_method_context_truncate(exports_cosmonic_llama_cpp_api_borrow_context_t self, uint32_t n, provider_string_t *err);
-bool exports_cosmonic_llama_cpp_api_static_sampler_create(exports_cosmonic_llama_cpp_api_borrow_model_t model, exports_cosmonic_llama_cpp_api_sampler_params_t *maybe_params, exports_cosmonic_llama_cpp_api_own_sampler_t *ret, provider_string_t *err);
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_sampler_sample(exports_cosmonic_llama_cpp_api_borrow_sampler_t self, exports_cosmonic_llama_cpp_api_borrow_context_t ctx);
+uint32_t exports_cosmonic_llama_cpp_api_method_context_n_ctx(exports_cosmonic_llama_cpp_api_borrow_context_t self);
+uint32_t exports_cosmonic_llama_cpp_api_method_context_n_batch(exports_cosmonic_llama_cpp_api_borrow_context_t self);
+uint32_t exports_cosmonic_llama_cpp_api_method_context_n_ubatch(exports_cosmonic_llama_cpp_api_borrow_context_t self);
+exports_cosmonic_llama_cpp_api_pooling_type_t exports_cosmonic_llama_cpp_api_method_context_pooling_type(exports_cosmonic_llama_cpp_api_borrow_context_t self);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_decode(exports_cosmonic_llama_cpp_api_borrow_context_t self, provider_list_u32_t *tokens);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_decode_callback(provider_event_t *event);
+void exports_cosmonic_llama_cpp_api_method_context_memory_clear(exports_cosmonic_llama_cpp_api_borrow_context_t self, bool data);
+bool exports_cosmonic_llama_cpp_api_method_context_memory_seq_rm(exports_cosmonic_llama_cpp_api_borrow_context_t self, int32_t seq_id, int32_t p0, int32_t p1);
+int32_t exports_cosmonic_llama_cpp_api_method_context_memory_seq_pos_min(exports_cosmonic_llama_cpp_api_borrow_context_t self, int32_t seq_id);
+int32_t exports_cosmonic_llama_cpp_api_method_context_memory_seq_pos_max(exports_cosmonic_llama_cpp_api_borrow_context_t self, int32_t seq_id);
+bool exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith(exports_cosmonic_llama_cpp_api_borrow_context_t self, int32_t i, provider_list_f32_t *ret);
+bool exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq(exports_cosmonic_llama_cpp_api_borrow_context_t self, int32_t seq_id, provider_list_f32_t *ret);
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_chain_init(void);
+bool exports_cosmonic_llama_cpp_api_method_sampler_chain_add(exports_cosmonic_llama_cpp_api_borrow_sampler_t self, exports_cosmonic_llama_cpp_api_own_sampler_t smpl, provider_string_t *err);
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_greedy(void);
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_dist(uint32_t seed);
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_top_k(int32_t k);
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_top_p(float p, uint32_t min_keep);
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_min_p(float p, uint32_t min_keep);
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_temp(float t);
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_penalties(exports_cosmonic_llama_cpp_api_borrow_model_t model, int32_t penalty_last_n, float penalty_repeat, float penalty_freq, float penalty_present);
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_logit_bias(exports_cosmonic_llama_cpp_api_borrow_model_t model, exports_cosmonic_llama_cpp_api_list_logit_bias_t *logit_bias);
+bool exports_cosmonic_llama_cpp_api_static_sampler_init_grammar(exports_cosmonic_llama_cpp_api_borrow_model_t model, provider_string_t *grammar_str, provider_string_t *grammar_root, exports_cosmonic_llama_cpp_api_own_sampler_t *ret, provider_string_t *err);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_sampler_sample(exports_cosmonic_llama_cpp_api_borrow_sampler_t self, exports_cosmonic_llama_cpp_api_borrow_context_t ctx, int32_t idx);
 provider_callback_code_t exports_cosmonic_llama_cpp_api_method_sampler_sample_callback(provider_event_t *event);
-bool exports_cosmonic_llama_cpp_api_json_schema_to_grammar(provider_string_t *schema, provider_string_t *ret, provider_string_t *err);
 
 // Helper Functions
-
-void exports_cosmonic_llama_cpp_api_list_logit_bias_free(exports_cosmonic_llama_cpp_api_list_logit_bias_t *ptr);
-
-void provider_option_string_free(provider_option_string_t *ptr);
-
-void exports_cosmonic_llama_cpp_api_sampler_params_free(exports_cosmonic_llama_cpp_api_sampler_params_t *ptr);
 
 void exports_cosmonic_llama_cpp_api_chat_message_free(exports_cosmonic_llama_cpp_api_chat_message_t *ptr);
 
@@ -342,6 +330,10 @@ extern exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_a
 extern exports_cosmonic_llama_cpp_api_sampler_t* exports_cosmonic_llama_cpp_api_sampler_rep(exports_cosmonic_llama_cpp_api_own_sampler_t handle);
 void exports_cosmonic_llama_cpp_api_sampler_destructor(exports_cosmonic_llama_cpp_api_sampler_t *rep);
 
+void exports_cosmonic_llama_cpp_api_list_chat_message_free(exports_cosmonic_llama_cpp_api_list_chat_message_t *ptr);
+
+void exports_cosmonic_llama_cpp_api_result_string_string_free(exports_cosmonic_llama_cpp_api_result_string_string_t *ptr);
+
 void provider_list_u8_free(provider_list_u8_t *ptr);
 
 void exports_cosmonic_llama_cpp_api_option_model_params_free(exports_cosmonic_llama_cpp_api_option_model_params_t *ptr);
@@ -352,31 +344,31 @@ void provider_list_u32_free(provider_list_u32_t *ptr);
 
 void exports_cosmonic_llama_cpp_api_result_list_u32_string_free(exports_cosmonic_llama_cpp_api_result_list_u32_string_t *ptr);
 
-void exports_cosmonic_llama_cpp_api_result_string_string_free(exports_cosmonic_llama_cpp_api_result_string_string_t *ptr);
-
 void exports_cosmonic_llama_cpp_api_result_list_u8_string_free(exports_cosmonic_llama_cpp_api_result_list_u8_string_t *ptr);
 
-void exports_cosmonic_llama_cpp_api_list_chat_message_free(exports_cosmonic_llama_cpp_api_list_chat_message_t *ptr);
+void provider_option_string_free(provider_option_string_t *ptr);
 
 void exports_cosmonic_llama_cpp_api_option_context_params_free(exports_cosmonic_llama_cpp_api_option_context_params_t *ptr);
 
 void exports_cosmonic_llama_cpp_api_result_own_context_string_free(exports_cosmonic_llama_cpp_api_result_own_context_string_t *ptr);
 
-void exports_cosmonic_llama_cpp_api_result_void_string_free(exports_cosmonic_llama_cpp_api_result_void_string_t *ptr);
+void exports_cosmonic_llama_cpp_api_result_void_s32_free(exports_cosmonic_llama_cpp_api_result_void_s32_t *ptr);
 
 void provider_list_f32_free(provider_list_f32_t *ptr);
 
-void exports_cosmonic_llama_cpp_api_result_list_f32_string_free(exports_cosmonic_llama_cpp_api_result_list_f32_string_t *ptr);
+void provider_option_list_f32_free(provider_option_list_f32_t *ptr);
 
-void exports_cosmonic_llama_cpp_api_option_sampler_params_free(exports_cosmonic_llama_cpp_api_option_sampler_params_t *ptr);
+void exports_cosmonic_llama_cpp_api_result_void_string_free(exports_cosmonic_llama_cpp_api_result_void_string_t *ptr);
+
+void exports_cosmonic_llama_cpp_api_list_logit_bias_free(exports_cosmonic_llama_cpp_api_list_logit_bias_t *ptr);
 
 void exports_cosmonic_llama_cpp_api_result_own_sampler_string_free(exports_cosmonic_llama_cpp_api_result_own_sampler_string_t *ptr);
+
+void exports_cosmonic_llama_cpp_api_result_u32_string_free(exports_cosmonic_llama_cpp_api_result_u32_string_t *ptr);
 void exports_cosmonic_llama_cpp_api_static_model_create_return(exports_cosmonic_llama_cpp_api_result_own_model_string_t ret);
 void exports_cosmonic_llama_cpp_api_static_context_create_return(exports_cosmonic_llama_cpp_api_result_own_context_string_t ret);
-void exports_cosmonic_llama_cpp_api_method_context_append_return(exports_cosmonic_llama_cpp_api_result_void_string_t ret);
-void exports_cosmonic_llama_cpp_api_method_context_append_tokens_return(exports_cosmonic_llama_cpp_api_result_void_string_t ret);
-void exports_cosmonic_llama_cpp_api_method_context_embed_return(exports_cosmonic_llama_cpp_api_result_list_f32_string_t ret);
-void exports_cosmonic_llama_cpp_api_method_sampler_sample_return(uint32_t ret);
+void exports_cosmonic_llama_cpp_api_method_context_decode_return(exports_cosmonic_llama_cpp_api_result_void_s32_t ret);
+void exports_cosmonic_llama_cpp_api_method_sampler_sample_return(exports_cosmonic_llama_cpp_api_result_u32_string_t ret);
 
 // Sets the string `ret` to reference the input string `s` without copying it
 void provider_string_set(provider_string_t *ret, const char*s);

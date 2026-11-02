@@ -6,6 +6,10 @@ edition = "2024"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+# Test a provider-with-json-schema build, including its converter.
+json-schema = []
+
 [dependencies]
 wit-bindgen = { version = "0.62.0", features = ["async"] }
 wstd = { version = "0.6.8" }

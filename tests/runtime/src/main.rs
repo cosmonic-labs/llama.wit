@@ -1,5 +1,3 @@
-#![recursion_limit = "256"]
-
 use clap::Parser;
 use colored::Colorize;
 use std::sync::Arc;
@@ -15,7 +13,8 @@ use wasmtime::{
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
     WasiHttpCtx,
-    p2::{WasiHttpCtxView, WasiHttpView},
+    p2::{WasiHttpCtxView as P2WasiHttpCtxView, WasiHttpView as P2WasiHttpView},
+    p3::{WasiHttpCtxView, WasiHttpView},
 };
 
 #[derive(clap::Parser, Debug)]
@@ -107,6 +106,16 @@ impl WasiHttpView for WorkloadState {
     }
 }
 
+impl P2WasiHttpView for WorkloadState {
+    fn http(&mut self) -> P2WasiHttpCtxView<'_> {
+        P2WasiHttpCtxView {
+            ctx: &mut self.wasi_http_ctx,
+            table: &mut self.table,
+            hooks: Default::default(),
+        }
+    }
+}
+
 impl WasiWebGpuCtxView for WorkloadState {
     fn webgpu_ctx(&mut self) -> WasiWebGpuCtx<'_> {
         WasiWebGpuCtx {
@@ -136,6 +145,7 @@ async fn main() -> anyhow::Result<()> {
     wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
     wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)?;
     wasmtime_wasi::p3::add_to_linker(&mut linker)?;
+    wasmtime_wasi_http::p3::add_to_linker(&mut linker)?;
     wasi_webgpu_wasmtime::add_to_linker(&mut linker)?;
 
     let mut store = Store::new(&engine, host_state.add_workload());

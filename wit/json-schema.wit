@@ -1,0 +1,20 @@
+/// llama.cpp's JSON Schema to GBNF converter, from its common library rather
+/// than llama.h. Only `provider-with-json-schema` exports it.
+interface json-schema {
+    /// Converts a JSON Schema to a GBNF grammar, with a `root` rule, for
+    /// `sampler.init-grammar`.
+    /// Fails if the schema is not valid JSON or uses something the converter
+    /// does not support.
+    to-grammar: func(schema: string) -> result<string, string>;
+}
+
+/// `provider`, plus the JSON Schema converter.
+world provider-with-json-schema {
+    include provider;
+    export json-schema;
+}
+
+world test-harness-with-json-schema {
+    include test-harness;
+    import json-schema;
+}
