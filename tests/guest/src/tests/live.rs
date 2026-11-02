@@ -1,5 +1,5 @@
 use super::inference;
-use crate::cosmonic::llama_cpp::api::{Context, ContextParams, Sampler};
+use crate::cosmonic::llama_cpp::api::{Context, ContextParams};
 use crate::models;
 
 pub async fn model_swaps() -> Result<(), String> {
@@ -11,9 +11,8 @@ pub async fn model_swaps() -> Result<(), String> {
         };
         let model = inference::load(source).await?;
         let context = Context::create(&model, None).await?;
-        context.append("Hello, my name is".into()).await?;
-        let sampler = Sampler::create(&model, None)?;
-        if inference::generate(&model, &context, &sampler, 4)
+        inference::prompt(&model, &context, "Hello, my name is").await?;
+        if inference::generate(&model, &context, &inference::greedy()?, 4)
             .await?
             .is_empty()
         {
@@ -34,6 +33,7 @@ pub async fn embeddings() -> Result<(), String> {
         Some(ContextParams {
             n_ctx: 512,
             n_batch: 512,
+            n_ubatch: 512,
             embeddings: true,
         }),
     )
@@ -44,9 +44,16 @@ pub async fn embeddings() -> Result<(), String> {
         "A puppy runs outdoors.",
         "The database transaction was rolled back.",
     ] {
-        let vector = context.embed(model.tokenize(input, true)?).await?;
+        context.memory_clear(true);
+        inference::decode(&context, model.tokenize(input, true, true)?).await?;
+        let vector = context
+            .get_embeddings_seq(0)
+            .ok_or("BGE gave no pooled embedding")?;
         if vector.len() != 384 || !vector.iter().all(|x| x.is_finite()) {
             return Err("invalid BGE vector".into());
+        }
+        if context.get_embeddings_ith(0).is_some() {
+            return Err("per-token embedding with pooling".into());
         }
         vectors.push(vector);
     }

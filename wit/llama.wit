@@ -1,204 +1,236 @@
-package cosmonic:llama-cpp@0.6.0;
+package cosmonic:llama-cpp@0.7.0;
 
-/// LLM inference over llama.cpp.
+/// llama.cpp's public API, `llama.h`, as WIT. Each function names the `llama.h`
+/// function it wraps. They differ only where WIT needs it: resources instead of
+/// pointers, `result`/`option` instead of NULL and error codes, `list<u8>` for
+/// files, and checks that turn llama.cpp's asserts into errors.
 ///
-/// The two central resources mirror llama.cpp's own layering:
-/// - `model`: immutable weights + vocabulary, loaded once from a GGUF file.
-/// - `context`: mutable inference state (the KV cache) over a borrowed model.
+/// `model` is `llama_model` and its `llama_vocab`, `context` is `llama_context`,
+/// `sampler` is `llama_sampler`.
 interface api {
-    /// Options for loading a model. Omitted params (`option::none`) use
-    /// llama.cpp defaults.
+    /// `llama_model_params`. Omitted params use llama.cpp defaults.
     record model-params {
-        /// Number of transformer layers to offload to a GPU backend.
-        /// Ignored when no GPU backend is compiled in.
-        n-gpu-layers: u32,
+        /// Number of layers to store in VRAM; negative means all.
+        n-gpu-layers: s32,
     }
 
-    /// Options for creating a context.
+    /// Options for creating a context (`llama_context_params`). Omitted params
+    /// use llama.cpp defaults.
     record context-params {
-        /// Size of the context window in tokens (prompt + generation).
-        /// Defaults to 4096. Values beyond `model.n-ctx-train` degrade quality.
+        /// Size of the context window in tokens (prompt + generation). `0`
+        /// uses `model.n-ctx-train`.
         n-ctx: u32,
-        /// Max tokens processed per decode step; caps the chunk size used
-        /// when feeding long prompts. Defaults to 512.
+        /// Max tokens per `decode` call. Must not be `0`.
         n-batch: u32,
-        /// Create the context for `embed` rather than for generation. An
-        /// input to `embed` must then fit in one batch of `n-batch` tokens.
+        /// Max tokens per micro-batch inside a `decode`. Non-causal models,
+        /// such as most embedding models, need a whole input in one, so set it
+        /// to `n-batch` for them. `0` uses `n-batch`.
+        n-ubatch: u32,
+        /// Output embeddings instead of logits; see `context.get-embeddings-ith`.
         embeddings: bool,
     }
 
-    /// Sampling configuration for `sampler`.
-    ///
-    /// Samplers are applied as a chain matching llama.cpp's conventions: the
-    /// grammar, logit bias, then repetition penalties, then top-k, top-p, min-p
-    /// and temperature, followed by a seeded random pick. `temp <= 0` replaces
-    /// the truncation, temperature and random pick with a greedy pick; the
-    /// logit bias and penalties still apply.
-    record sampler-params {
-        /// Temperature. Higher = more random; `<= 0` = greedy (deterministic).
-        temp: f32,
-        /// Keep only the `top-k` most likely tokens. `0` disables.
-        top-k: u32,
-        /// Nucleus sampling: keep tokens covering this probability mass.
-        /// `>= 1` disables.
-        top-p: f32,
-        /// Drop tokens below `min-p` times the top token's probability.
-        /// `0` disables.
-        min-p: f32,
-        /// Seed for the random pick, for reproducible sampling.
-        /// `4294967295` picks a random seed.
-        seed: u32,
-        /// How many of the most recently sampled tokens the penalties look at.
-        /// `0` disables every penalty. The window is allocated up front, so
-        /// keep it within the context size.
-        penalty-last-n: u32,
-        /// Divides the logits of tokens already in the window. `1` disables.
-        repeat-penalty: f32,
-        /// Subtracted once per occurrence of a token in the window. `0`
-        /// disables.
-        frequency-penalty: f32,
-        /// Subtracted once from any token present in the window. `0` disables.
-        presence-penalty: f32,
-        /// Added to the logits of specific tokens before sampling. A large
-        /// negative bias bans a token.
-        logit-bias: list<logit-bias>,
-        /// A GBNF grammar, with a `root` rule, that the output must match.
-        /// End of generation is only sampled once the grammar is complete.
-        /// `json-schema-to-grammar` makes one from a JSON Schema.
-        grammar: option<string>,
+    /// `llama_pooling_type`.
+    enum pooling-type {
+        unspecified,
+        none,
+        mean,
+        cls,
+        last,
+        rank,
     }
 
+    /// `llama_logit_bias`.
     record logit-bias {
         token: u32,
         bias: f32,
     }
 
-    /// One turn of a conversation, for `model.apply-chat-template`.
+    /// `llama_chat_message`.
     record chat-message {
         /// Typically "system", "user", or "assistant".
         role: string,
         content: string,
     }
 
-    /// A loaded model (weights + vocabulary). Immutable; any number of
-    /// contexts can be created from one model.
+    /// `llama_chat_apply_template`: formats `chat` with `tmpl`, such as one
+    /// from `model.chat-template`. With `add-ass` it ends with the prompt for
+    /// the assistant's reply. Fails if llama.cpp does not recognise `tmpl`.
+    chat-apply-template: func(tmpl: string, chat: list<chat-message>, add-ass: bool) -> result<string, string>;
+
+    /// A loaded model and its vocabulary. Any number of contexts can be created
+    /// from one model.
     resource model {
-        /// Load a model from the raw bytes of a GGUF file. The caller reads the
-        /// file (or otherwise obtains the bytes) and passes them in, so the
-        /// provider itself does no filesystem I/O. Fails with a message if the
-        /// bytes are not a valid model.
+        /// `llama_model_load_from_file_ptr`, over the bytes of a GGUF file so
+        /// the provider does no filesystem I/O.
         create: static async func(data: list<u8>, params: option<model-params>) -> result<model, string>;
 
-        /// Convert text to tokens.
-        ///
-        /// `add-special` prepends the model's start tokens (e.g. BOS) — set
-        /// it for the beginning of a sequence, not for continuations.
-        tokenize: func(text: string, add-special: bool) -> result<list<u32>, string>;
+        /// `llama_tokenize`. `add-special` adds the model's start tokens (such
+        /// as BOS); `parse-special` turns special-token text into those tokens.
+        tokenize: func(text: string, add-special: bool, parse-special: bool) -> result<list<u32>, string>;
 
-        /// Convert tokens back to text.
-        ///
-        /// Bytes that are not valid UTF-8, such as a character cut off at
-        /// the end of `tokens`, come back as U+FFFD. To stream text a token at
-        /// a time, collect `token-to-piece` bytes instead.
-        detokenize: func(tokens: list<u32>) -> result<string, string>;
+        /// `llama_detokenize`. Bytes that are not valid UTF-8, such as a
+        /// character cut off at the end of `tokens`, come back as U+FFFD; to
+        /// stream text, collect `token-to-piece` bytes instead.
+        detokenize: func(tokens: list<u32>, remove-special: bool, unparse-special: bool) -> result<string, string>;
 
-        /// The raw bytes one token stands for.
-        ///
-        /// A token may hold only part of a UTF-8 character, so the bytes are
-        /// not always valid text on their own. With `special`, control tokens
-        /// render as their text instead of as nothing.
-        token-to-piece: func(token: u32, special: bool) -> result<list<u8>, string>;
+        /// `llama_token_to_piece`: the raw bytes of `token`, which may be part
+        /// of a UTF-8 character. `lstrip` skips up to that many leading spaces;
+        /// with `special`, control tokens render as their text.
+        token-to-piece: func(token: u32, lstrip: s32, special: bool) -> result<list<u8>, string>;
 
-        /// Whether `token` ends generation (end-of-sequence, end-of-turn, ...).
+        /// `llama_vocab_is_eog`.
         is-eog: func(token: u32) -> bool;
 
-        /// Format a conversation with the model's built-in chat template.
-        ///
-        /// With `add-assistant` the returned string ends with the prompt for
-        /// the assistant's next reply (use before generating); without it the
-        /// conversation is closed after the last message (use to measure how
-        /// much of the transcript has already been formatted).
-        /// Fails if the model ships no chat template.
-        apply-chat-template: func(messages: list<chat-message>, add-assistant: bool) -> result<string, string>;
+        /// `llama_model_chat_template`: the template called `name`, or the
+        /// default one; `none` if the model has none.
+        chat-template: func(name: option<string>) -> option<string>;
 
-        /// Short human-readable description (architecture, size, quantization).
+        /// `llama_model_desc`.
         description: func() -> string;
 
-        /// Context length the model was trained with.
+        /// `llama_model_n_ctx_train`.
         n-ctx-train: func() -> u32;
 
-        /// Length of the vectors `context.embed` returns.
-        n-embd: func() -> u32;
+        /// `llama_model_n_embd_out`: the length of `context.get-embeddings-ith`
+        /// vectors.
+        n-embd-out: func() -> u32;
+
+        /// Length of a `rank` pooled output (`llama_model_n_cls_out`).
+        n-cls-out: func() -> u32;
+
+        /// Number of tokens in the vocabulary (`llama_vocab_n_tokens`).
+        n-vocab: func() -> u32;
+
+        /// Size of the sliding attention window, `0` without one
+        /// (`llama_model_n_swa`).
+        n-swa: func() -> u32;
     }
 
-    /// Inference state over a model: holds the KV cache, so text fed via
-    /// `append`/`append-tokens` persists and generation continues from where
-    /// the context left off. This is what makes multi-turn chat cheap: feed
-    /// only each turn's delta instead of re-processing the transcript.
+    /// Inference state over a model (`llama_context`): holds the KV cache, so
+    /// decoded tokens persist and generation continues from where the context
+    /// left off.
     ///
-    /// The model must outlive every context created from it.
+    /// Positions and sequence ids are `llama_pos` and `llama_seq_id`; `decode`
+    /// only writes sequence 0.
+    ///
+    /// The context keeps its model loaded, even after the model handle is dropped.
     resource context {
+        /// `llama_init_from_model`.
         create: static async func(model: borrow<model>, params: option<context-params>) -> result<context, string>;
 
-        /// Tokenize `text` and feed it into the context (grows the KV cache),
-        /// without generating. Start tokens are added automatically when the
-        /// context is empty. Input that would overflow the context window is
-        /// refused before any of it is decoded.
-        append: async func(text: string) -> result<_, string>;
+        /// `llama_n_ctx`.
+        n-ctx: func() -> u32;
+        /// `llama_n_batch`.
+        n-batch: func() -> u32;
+        /// `llama_n_ubatch`.
+        n-ubatch: func() -> u32;
+        /// `llama_pooling_type`.
+        pooling-type: func() -> pooling-type;
 
-        /// Same, for pre-tokenized input (see `model.tokenize`). Useful to
-        /// control chunking: each call decodes at most `n-batch` tokens at a
-        /// time, and callers can split work into several calls (e.g. to drive
-        /// a progress indicator between them).
-        append-tokens: async func(tokens: list<u32>) -> result<_, string>;
-
-        /// Embeds `tokens` as one sequence and returns its vector, which is not
-        /// normalized. Uses the model's pooling, or the mean of the token
-        /// embeddings for a model without one. Needs a context created with
-        /// `embeddings`; clears the context first.
-        embed: async func(tokens: list<u32>) -> result<list<f32>, string>;
-
-        /// Number of tokens in the context so far (appended + generated).
-        n-past: func() -> u32;
-
-        /// Reset to an empty context (clears the KV cache).
-        clear: func();
-
-        /// Keeps the first `n` tokens and forgets the rest, so a prompt that
-        /// shares a prefix with what the context holds only has to append the
-        /// part that differs. Append at least one token before sampling again.
+        /// `llama_decode(ctx, llama_batch_get_one(tokens))`: appends `tokens`
+        /// to sequence 0, after its last position. Without `embeddings`, only
+        /// the last token gets logits to sample from.
         ///
-        /// Fails, leaving the context empty, when `n` is more than the context
-        /// holds or the model's memory cannot give back the prefix: recurrent
-        /// models cannot forget tokens from the end, and sliding-window
-        /// attention may already have dropped tokens the prefix needs. Append
-        /// the whole prompt then.
-        truncate: func(n: u32) -> result<_, string>;
+        /// Fails with llama_decode's code: `1` no room in the KV cache (the
+        /// context is unchanged), `2` aborted, `-1` invalid input (including
+        /// more than `n-batch` tokens, or more than `n-ubatch` for a
+        /// non-causal model), `< -1` fatal. On `2` and `< -1`, tokens already
+        /// processed stay in the memory.
+        decode: async func(tokens: list<u32>) -> result<_, s32>;
+
+        /// `llama_memory_clear`. With `data` the buffers are zeroed too.
+        memory-clear: func(data: bool);
+
+        /// `llama_memory_seq_rm`: removes positions `[p0, p1)` of `seq-id`.
+        /// `seq-id < 0` matches any sequence, `p0 < 0` means 0, `p1 < 0` means
+        /// to the end. Returns false if a partial sequence cannot be removed,
+        /// or for `seq-id < 0` on a recurrent model; use `memory-clear` there.
+        /// With sliding-window attention, a kept prefix of `n` tokens is only
+        /// usable while `memory-seq-pos-min` is at most `n - n-swa`.
+        memory-seq-rm: func(seq-id: s32, p0: s32, p1: s32) -> bool;
+
+        /// `llama_memory_seq_pos_min`: the smallest position held for
+        /// `seq-id`, or `-1` if it is empty or invalid. Non-zero once sliding-window
+        /// attention has dropped old tokens.
+        memory-seq-pos-min: func(seq-id: s32) -> s32;
+
+        /// `llama_memory_seq_pos_max`: the largest position held for `seq-id`,
+        /// or `-1` if it is empty or invalid.
+        memory-seq-pos-max: func(seq-id: s32) -> s32;
+
+        /// `llama_get_embeddings_ith`: the embedding of the `i`th token of the
+        /// last `decode`, `n-embd-out` long. Negative `i` counts from the end.
+        /// `none` for an invalid `i`, a context without `embeddings`, or pooling
+        /// other than `none`.
+        get-embeddings-ith: func(i: s32) -> option<list<f32>>;
+
+        /// `llama_get_embeddings_seq`: the pooled embedding of `seq-id`,
+        /// `n-embd-out` long, or `n-cls-out` long for `rank` pooling. `none` with
+        /// pooling `none`.
+        get-embeddings-seq: func(seq-id: s32) -> option<list<f32>>;
     }
 
-    /// A sampler chain (mirrors `llama_sampler_chain`). Generation is a
-    /// caller-side loop over the primitives, as in llama.cpp itself:
+    /// `llama_sampler`. Build a chain with `chain-init` and `chain-add`, as in
+    /// llama.cpp; generation is a caller-side loop:
     ///
-    ///   let tok = sampler.sample(ctx);        // pick from last logits
+    ///   let tok = chain.sample(ctx, -1)?;     // pick from the last logits
     ///   if model.is-eog(tok) { done }
-    ///   bytes += model.token-to-piece(tok, false);
-    ///   ctx.append-tokens([tok]);             // decode; makes next logits
+    ///   bytes += model.token-to-piece(tok, 0, false);
+    ///   ctx.decode([tok]);                    // makes the next logits
     ///
-    /// The context must be non-empty (append a prompt first).
+    /// A sampler made from a model keeps that model loaded.
     resource sampler {
-        /// `none` = greedy sampling. The model sizes the logit bias and
-        /// compiles the grammar; the sampler does not keep a reference to it.
-        /// Fails if the grammar does not parse.
-        create: static func(model: borrow<model>, params: option<sampler-params>) -> result<sampler, string>;
+        /// `llama_sampler_chain_init`.
+        chain-init: static func() -> sampler;
 
-        /// Sample one token from the context's current logits.
-        sample: async func(ctx: borrow<context>) -> u32;
+        /// `llama_sampler_chain_add`: appends `smpl`, which the chain then
+        /// owns. Fails, dropping `smpl`, if this sampler is not a chain or the
+        /// two were made for different models.
+        chain-add: func(smpl: sampler) -> result<_, string>;
+
+        /// `llama_sampler_init_greedy`.
+        init-greedy: static func() -> sampler;
+
+        /// `llama_sampler_init_dist`. `4294967295` picks a random seed.
+        init-dist: static func(seed: u32) -> sampler;
+
+        /// `llama_sampler_init_top_k`. `k <= 0` disables.
+        init-top-k: static func(k: s32) -> sampler;
+
+        /// `llama_sampler_init_top_p`.
+        init-top-p: static func(p: f32, min-keep: u32) -> sampler;
+
+        /// `llama_sampler_init_min_p`.
+        init-min-p: static func(p: f32, min-keep: u32) -> sampler;
+
+        /// `llama_sampler_init_temp`. `t <= 0` keeps only the most likely token.
+        init-temp: static func(t: f32) -> sampler;
+
+        /// `llama_sampler_init_penalties`, with `n_vocab` from `model`.
+        /// `penalty-last-n` is how many recent tokens to look at (`0`
+        /// disables); `1`, `0` and `0` disable the three penalties. The window
+        /// is allocated up front, so keep it within the context size.
+        init-penalties: static func(model: borrow<model>, penalty-last-n: s32, penalty-repeat: f32, penalty-freq: f32, penalty-present: f32) -> sampler;
+
+        /// `llama_sampler_init_logit_bias`, with `n_vocab` from `model`.
+        /// Biases for tokens outside the vocabulary are dropped.
+        init-logit-bias: static func(model: borrow<model>, logit-bias: list<logit-bias>) -> sampler;
+
+        /// `llama_sampler_init_grammar`: restricts output to the GBNF grammar
+        /// `grammar-str`, starting from rule `grammar-root`. Fails if the
+        /// grammar does not parse; an empty `grammar-str` constrains nothing. `json-schema.to-grammar` makes one from a
+        /// JSON Schema.
+        init-grammar: static func(model: borrow<model>, grammar-str: string, grammar-root: string) -> result<sampler, string>;
+
+        /// `llama_sampler_sample`: samples and accepts a token from the
+        /// `idx`th output of the last `decode`; `-1` is the last one. Fails if
+        /// that output has no logits, if the sampler was made for another model
+        /// than the context's, if no sampler in the chain picks a token,
+        /// or if the pick is one an earlier sampler ruled out (such as a
+        /// grammar placed after `top-k`).
+        sample: async func(ctx: borrow<context>, idx: s32) -> result<u32, string>;
     }
-
-    /// Converts a JSON Schema to a GBNF grammar for `sampler-params.grammar`,
-    /// with llama.cpp's own converter. Fails if the schema is not valid JSON
-    /// or uses something the converter does not support.
-    json-schema-to-grammar: func(schema: string) -> result<string, string>;
 }
 
 /// Implemented by the llama-cpp-wit component.

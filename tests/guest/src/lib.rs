@@ -1,8 +1,16 @@
 use wit_bindgen::generate;
 
+#[cfg(not(feature = "json-schema"))]
 generate!({
     path: "../../wit/",
     world: "test-harness",
+    generate_all,
+});
+
+#[cfg(feature = "json-schema")]
+generate!({
+    path: "../../wit/",
+    world: "test-harness-with-json-schema",
     generate_all,
 });
 

@@ -1,28 +1,15 @@
-// Implements cosmonic:llama-cpp/api (see wit/llama.wit) on top of llama.cpp,
-// against the wit-bindgen C bindings (provider.h). Pure C over llama.h's C API.
-//
-// Exports own their arguments: the canonical ABI allocates them in this
-// component's memory and nothing else frees them, so every export frees what it
-// is handed (resource borrows aside).
+// cosmonic:llama-cpp/api (wit/llama.wit) over llama.cpp's C API
+// Exports own their arguments, so each one frees what it is handed (borrows aside)
 #include "provider.h"
 #include "llama.h"
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-// wasi-sdk wasip3 workaround: _initialize runs constructors before the
-// cooperative-threading stack pointer is set, so any ctor that touches the stack
-// traps. A highest-priority constructor runs the stack init first. Weak so a
-// wasip2 build still links. TODO: remove once wasi-sdk fixes reactor init.
-extern void __wasm_init_task(void) __attribute__((weak));
-static void ensure_stack(void) { if (__wasm_init_task) { __wasm_init_task(); } }
-__attribute__((constructor(101)))
-static void wasip3_init_stack(void) { ensure_stack(); }
-
-// Short aliases for the (verbose) wit-bindgen resource-rep types.
 typedef exports_cosmonic_llama_cpp_api_model_t   model_t;
 typedef exports_cosmonic_llama_cpp_api_context_t context_t;
 typedef exports_cosmonic_llama_cpp_api_sampler_t sampler_t;
@@ -31,20 +18,42 @@ typedef exports_cosmonic_llama_cpp_api_sampler_t sampler_t;
 struct exports_cosmonic_llama_cpp_api_model_t {
     struct llama_model *       model;
     const struct llama_vocab * vocab;
+    uint32_t                   refs;     // the handle, plus each context and sampler using it
 };
 struct exports_cosmonic_llama_cpp_api_context_t {
     struct llama_context * ctx;
-    const model_t *        model;    // borrowed; the model must outlive the context
-    uint32_t               batch_size;
-    uint32_t               past;
-    bool                   embeddings;
+    model_t *              model;    // retained, so dropping the model handle first is safe
 };
 struct exports_cosmonic_llama_cpp_api_sampler_t {
     struct llama_sampler * smpl;
+    model_t *              model;    // retained; NULL unless built from (or holding) a model's sampler
+    llama_token_data *     cur;      // candidates for sample, reused across calls
+    size_t                 cur_cap;
 };
+
+static model_t * model_retain(model_t * model) {
+    if (model) {
+        model->refs++;
+    }
+    return model;
+}
+
+static void model_release(model_t * model) {
+    if (model && --model->refs == 0) {
+        llama_model_free(model->model);
+        free(model);
+    }
+}
 
 static void set_err(provider_string_t * err, const char * msg) {
     provider_string_dup(err, msg);
+}
+
+static char * cstr(const provider_string_t * s) {
+    char * out = (char *) malloc(s->len + 1);
+    memcpy(out, s->ptr, s->len);
+    out[s->len] = '\0';
+    return out;
 }
 
 // llama.cpp throws on an out-of-range token id, which traps the component.
@@ -58,9 +67,9 @@ static bool tokens_in_range(const model_t * model, const uint32_t * toks, size_t
     return true;
 }
 
-// Copies `len` bytes into a WIT string, replacing invalid UTF-8 with U+FFFD:
-// lifting a string that is not UTF-8 traps the caller.
-static void string_from_bytes(const char * in, size_t len, provider_string_t * out) {
+// Lifting a string that is not UTF-8 traps the caller, so replace bad bytes with U+FFFD
+// Not static: grammar.cpp uses it too
+void string_from_bytes(const char * in, size_t len, provider_string_t * out) {
     const unsigned char * s = (const unsigned char *) in;
     // Each input byte becomes at most one 3-byte U+FFFD.
     uint8_t * buf = (uint8_t *) malloc(len * 3 + 1);
@@ -104,22 +113,10 @@ static void string_from_bytes(const char * in, size_t len, provider_string_t * o
     out->len = o;
 }
 
-// No-op log sink. On wasip3, writing to stderr is an async WASI call that a sync
-// export can't block on, so the provider must never log; the consumer owns I/O.
+// Sync exports can't block on wasip3's async stderr, so never log
 static void log_cb(enum ggml_log_level level, const char * text, void * user) {
     (void) level; (void) text; (void) user;
 }
-
-// Async exports use the callback ABI: the entry point does the work (blocking on
-// the component-model waitable-set is legal here, which is what the wasi:webgpu
-// glue needs), publishes the result with the generated `..._return`, and exits.
-// The paired `..._callback` is therefore unreachable — we always finish inline
-// rather than parking on a waitable set.
-#define UNREACHABLE_CALLBACK(name)                                                  \
-    provider_callback_code_t name(provider_event_t * event) {                       \
-        (void) event;                                                               \
-        abort();                                                                    \
-    }
 
 // --- model ---
 
@@ -128,9 +125,6 @@ static bool model_create(
         exports_cosmonic_llama_cpp_api_model_params_t * maybe_params,
         exports_cosmonic_llama_cpp_api_own_model_t * ret,
         provider_string_t * err) {
-    // Route llama + ggml logging to a no-op sink so the provider never writes to
-    // stderr (a WASI call). The statically-linked CPU backend registers itself, so
-    // we do NOT call ggml_backend_load_all() (which scans the filesystem).
     static bool inited = false;
     if (!inited) {
         llama_log_set(log_cb, NULL);
@@ -142,15 +136,13 @@ static bool model_create(
     if (maybe_params) {
         mp.n_gpu_layers = maybe_params->n_gpu_layers;
     }
-    // Load from the in-memory bytes via fmemopen -> no filesystem I/O, so this
-    // sync export never blocks on wasip3's async wasi:filesystem.
+    // fmemopen avoids wasip3's async wasi:filesystem
     FILE * f = fmemopen(data->ptr, data->len, "rb");
     if (!f) {
         set_err(err, "fmemopen failed");
         return false;
     }
-    // Loading from a FILE copies the tensors out, so the GGUF bytes can go as
-    // soon as the file is closed.
+    // Loading copies the tensors out, so the GGUF bytes can go once the file is closed
     struct llama_model * m = llama_model_load_from_file_ptr(f, mp);
     fclose(f);
     if (!m) {
@@ -160,6 +152,7 @@ static bool model_create(
     model_t * rep = (model_t *) malloc(sizeof(model_t));
     rep->model = m;
     rep->vocab = llama_model_get_vocab(m);
+    rep->refs = 1;
     *ret = exports_cosmonic_llama_cpp_api_model_new(rep);
     return true;
 }
@@ -174,22 +167,24 @@ provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(
     return PROVIDER_CALLBACK_CODE_EXIT;
 }
 
-UNREACHABLE_CALLBACK(exports_cosmonic_llama_cpp_api_static_model_create_callback)
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_static_model_create never returns yield/wait
+    abort();
+}
 
 void exports_cosmonic_llama_cpp_api_model_destructor(model_t * rep) {
-    ensure_stack();  // wasip3: resource-drop callbacks run with SP=0; set it first
-    llama_model_free(rep->model);
-    free(rep);
+    model_release(rep);
 }
 
 static bool model_tokenize(
-        model_t * self, provider_string_t * text, bool add_special,
+        model_t * self, provider_string_t * text, bool add_special, bool parse_special,
         provider_list_u32_t * ret, provider_string_t * err) {
     const char * t = (const char *) text->ptr;
     int32_t len = (int32_t) text->len;
-    int n = -llama_tokenize(self->vocab, t, len, NULL, 0, add_special, true);
+    int n = -llama_tokenize(self->vocab, t, len, NULL, 0, add_special, parse_special);
     uint32_t * out = (uint32_t *) malloc(sizeof(uint32_t) * (n ? (size_t) n : 1));
-    if (llama_tokenize(self->vocab, t, len, (llama_token *) out, n, add_special, true) < 0) {
+    if (llama_tokenize(self->vocab, t, len, (llama_token *) out, n, add_special, parse_special) < 0) {
         free(out);
         set_err(err, "failed to tokenize");
         return false;
@@ -200,61 +195,55 @@ static bool model_tokenize(
 }
 
 bool exports_cosmonic_llama_cpp_api_method_model_tokenize(
-        model_t * self, provider_string_t * text, bool add_special,
+        model_t * self, provider_string_t * text, bool add_special, bool parse_special,
         provider_list_u32_t * ret, provider_string_t * err) {
-    bool ok = model_tokenize(self, text, add_special, ret, err);
+    bool ok = model_tokenize(self, text, add_special, parse_special, ret, err);
     provider_string_free(text);
     return ok;
 }
 
 static bool model_detokenize(
-        model_t * self, provider_list_u32_t * tokens,
+        model_t * self, provider_list_u32_t * tokens, bool remove_special, bool unparse_special,
         provider_string_t * ret, provider_string_t * err) {
     if (!tokens_in_range(self, tokens->ptr, tokens->len)) {
         set_err(err, "token out of range");
         return false;
     }
-    size_t cap = tokens->len * 8 + 16;
-    char * buf = (char *) malloc(cap);
-    size_t len = 0;
-    // Preserve leading spaces when callers decode one token at a time.
-    for (size_t i = 0; i < tokens->len; i++) {
-        int n = llama_token_to_piece(self->vocab, (llama_token) tokens->ptr[i],
-                                     buf + len, (int32_t) (cap - len), 0, true);
-        if (n < 0) {
-            cap = len + (size_t) (-n) + 16;
-            char * grown = (char *) realloc(buf, cap);
-            if (!grown) {
-                free(buf);
-                set_err(err, "out of memory");
-                return false;
-            }
-            buf = grown;
-            n = llama_token_to_piece(self->vocab, (llama_token) tokens->ptr[i],
-                                     buf + len, (int32_t) (cap - len), 0, true);
-        }
-        if (n < 0) {
-            free(buf);
-            set_err(err, "failed to detokenize");
-            return false;
-        }
-        len += (size_t) n;
+    if (tokens->len > (INT32_MAX - 16) / 8) {
+        set_err(err, "too many tokens");
+        return false;
     }
-    string_from_bytes(buf, len, ret);
+    const llama_token * toks = (const llama_token *) tokens->ptr;
+    int32_t n_tokens = (int32_t) tokens->len;
+    int32_t cap = n_tokens * 8 + 16;
+    char * buf = (char *) malloc((size_t) cap);
+    int32_t n = llama_detokenize(self->vocab, toks, n_tokens, buf, cap, remove_special, unparse_special);
+    if (n < 0) {
+        cap = -n;
+        free(buf);
+        buf = (char *) malloc((size_t) cap);
+        n = llama_detokenize(self->vocab, toks, n_tokens, buf, cap, remove_special, unparse_special);
+    }
+    if (n < 0) {
+        free(buf);
+        set_err(err, "failed to detokenize");
+        return false;
+    }
+    string_from_bytes(buf, (size_t) n, ret);
     free(buf);
     return true;
 }
 
 bool exports_cosmonic_llama_cpp_api_method_model_detokenize(
-        model_t * self, provider_list_u32_t * tokens,
+        model_t * self, provider_list_u32_t * tokens, bool remove_special, bool unparse_special,
         provider_string_t * ret, provider_string_t * err) {
-    bool ok = model_detokenize(self, tokens, ret, err);
+    bool ok = model_detokenize(self, tokens, remove_special, unparse_special, ret, err);
     provider_list_u32_free(tokens);
     return ok;
 }
 
 bool exports_cosmonic_llama_cpp_api_method_model_token_to_piece(
-        model_t * self, uint32_t token, bool special,
+        model_t * self, uint32_t token, int32_t lstrip, bool special,
         provider_list_u8_t * ret, provider_string_t * err) {
     if (!tokens_in_range(self, &token, 1)) {
         set_err(err, "token out of range");
@@ -262,10 +251,10 @@ bool exports_cosmonic_llama_cpp_api_method_model_token_to_piece(
     }
     char small[64];
     char * buf = small;
-    int n = llama_token_to_piece(self->vocab, (llama_token) token, buf, sizeof(small), 0, special);
+    int n = llama_token_to_piece(self->vocab, (llama_token) token, buf, sizeof(small), lstrip, special);
     if (n < 0) {
         buf = (char *) malloc((size_t) (-n));
-        n = llama_token_to_piece(self->vocab, (llama_token) token, buf, -n, 0, special);
+        n = llama_token_to_piece(self->vocab, (llama_token) token, buf, -n, lstrip, special);
     }
     if (n < 0) {
         if (buf != small) {
@@ -288,40 +277,43 @@ bool exports_cosmonic_llama_cpp_api_method_model_is_eog(model_t * self, uint32_t
     return tokens_in_range(self, &token, 1) && llama_vocab_is_eog(self->vocab, token);
 }
 
-static bool model_apply_chat_template(
-        model_t * self, exports_cosmonic_llama_cpp_api_list_chat_message_t * messages,
-        bool add_assistant, provider_string_t * ret, provider_string_t * err) {
-    const char * tmpl = llama_model_chat_template(self->model, NULL);
+bool exports_cosmonic_llama_cpp_api_method_model_chat_template(
+        model_t * self, provider_string_t * maybe_name, provider_string_t * ret) {
+    char * name = maybe_name ? cstr(maybe_name) : NULL;
+    const char * tmpl = llama_model_chat_template(self->model, name);
+    free(name);
+    if (maybe_name) {
+        provider_string_free(maybe_name);
+    }
     if (!tmpl) {
-        set_err(err, "model has no chat template");
         return false;
     }
+    string_from_bytes(tmpl, strlen(tmpl), ret);
+    return true;
+}
 
-    // Null-terminated copies for llama_chat_message (role/content are const char*).
-    size_t nmsg = messages->len;
-    struct llama_chat_message * msgs = (struct llama_chat_message *) malloc(nmsg * sizeof(*msgs));
+static bool chat_apply_template(
+        provider_string_t * tmpl, exports_cosmonic_llama_cpp_api_list_chat_message_t * chat,
+        bool add_ass, provider_string_t * ret, provider_string_t * err) {
+    // llama_chat_message needs null-terminated strings
+    size_t nmsg = chat->len;
+    struct llama_chat_message * msgs = (struct llama_chat_message *) malloc((nmsg ? nmsg : 1) * sizeof(*msgs));
     for (size_t i = 0; i < nmsg; i++) {
-        provider_string_t * role = &messages->ptr[i].role;
-        provider_string_t * content = &messages->ptr[i].content;
-        char * r = (char *) malloc(role->len + 1);
-        memcpy(r, role->ptr, role->len);
-        r[role->len] = '\0';
-        char * c = (char *) malloc(content->len + 1);
-        memcpy(c, content->ptr, content->len);
-        c[content->len] = '\0';
-        msgs[i].role = r;
-        msgs[i].content = c;
+        msgs[i].role = cstr(&chat->ptr[i].role);
+        msgs[i].content = cstr(&chat->ptr[i].content);
+    }
+    char * t = cstr(tmpl);
+
+    int32_t cap = 1024;
+    char * buf = (char *) malloc((size_t) cap);
+    int32_t n = llama_chat_apply_template(t, msgs, nmsg, add_ass, buf, cap);
+    if (n > cap) {
+        cap = n;
+        buf = (char *) realloc(buf, (size_t) cap);
+        n = llama_chat_apply_template(t, msgs, nmsg, add_ass, buf, cap);
     }
 
-    size_t cap = 1024;
-    char * buf = (char *) malloc(cap);
-    int n = llama_chat_apply_template(tmpl, msgs, nmsg, add_assistant, buf, cap);
-    if (n > (int) cap) {
-        cap = (size_t) n;
-        buf = (char *) realloc(buf, cap);
-        n = llama_chat_apply_template(tmpl, msgs, nmsg, add_assistant, buf, cap);
-    }
-
+    free(t);
     for (size_t i = 0; i < nmsg; i++) {
         free((void *) msgs[i].role);
         free((void *) msgs[i].content);
@@ -333,23 +325,22 @@ static bool model_apply_chat_template(
         set_err(err, "failed to apply chat template");
         return false;
     }
-    provider_string_dup_n(ret, buf, (size_t) n);
+    string_from_bytes(buf, (size_t) n, ret);
     free(buf);
     return true;
 }
 
-bool exports_cosmonic_llama_cpp_api_method_model_apply_chat_template(
-        model_t * self, exports_cosmonic_llama_cpp_api_list_chat_message_t * messages,
-        bool add_assistant, provider_string_t * ret, provider_string_t * err) {
-    bool ok = model_apply_chat_template(self, messages, add_assistant, ret, err);
-    exports_cosmonic_llama_cpp_api_list_chat_message_free(messages);
+bool exports_cosmonic_llama_cpp_api_chat_apply_template(
+        provider_string_t * tmpl, exports_cosmonic_llama_cpp_api_list_chat_message_t * chat,
+        bool add_ass, provider_string_t * ret, provider_string_t * err) {
+    bool ok = chat_apply_template(tmpl, chat, add_ass, ret, err);
+    provider_string_free(tmpl);
+    exports_cosmonic_llama_cpp_api_list_chat_message_free(chat);
     return ok;
 }
 
 void exports_cosmonic_llama_cpp_api_method_model_description(model_t * self, provider_string_t * ret) {
-    ensure_stack();
-    // Fail closed: an unwritten buf would otherwise be strlen'd by
-    // provider_string_dup and hand the caller a slice of linear memory.
+    // Zeroed so a failed llama_model_desc can't leak linear memory
     char buf[256] = {0};
     int n = llama_model_desc(self->model, buf, sizeof(buf));
     if (n < 0) {
@@ -362,62 +353,39 @@ uint32_t exports_cosmonic_llama_cpp_api_method_model_n_ctx_train(model_t * self)
     return llama_model_n_ctx_train(self->model);
 }
 
-uint32_t exports_cosmonic_llama_cpp_api_method_model_n_embd(model_t * self) {
+uint32_t exports_cosmonic_llama_cpp_api_method_model_n_embd_out(model_t * self) {
     return (uint32_t) llama_model_n_embd_out(self->model);
 }
 
-// --- context ---
-
-static bool append_tokens(context_t * self, const uint32_t * toks, size_t count, provider_string_t * err) {
-    if (!tokens_in_range(self->model, toks, count)) {
-        set_err(err, "token out of range");
-        return false;
-    }
-    // Checked up front: a decode that overflows fails partway, leaving the
-    // chunks before it in the KV cache.
-    uint32_t n_ctx = llama_n_ctx(self->ctx);
-    if (count > (size_t) (n_ctx - self->past)) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "context window full: %zu tokens do not fit in the %u left of %u",
-                 count, n_ctx - self->past, n_ctx);
-        set_err(err, msg);
-        return false;
-    }
-    for (size_t i = 0; i < count; i += self->batch_size) {
-        size_t rem = count - i;
-        size_t n = self->batch_size < rem ? self->batch_size : rem;
-        struct llama_batch batch = llama_batch_get_one((llama_token *) (toks + i), n);
-        if (llama_decode(self->ctx, batch)) {
-            set_err(err, "decode failed");
-            return false;
-        }
-        self->past += n;
-    }
-    return true;
+uint32_t exports_cosmonic_llama_cpp_api_method_model_n_cls_out(model_t * self) {
+    return llama_model_n_cls_out(self->model);
 }
+
+uint32_t exports_cosmonic_llama_cpp_api_method_model_n_vocab(model_t * self) {
+    return (uint32_t) llama_vocab_n_tokens(self->vocab);
+}
+
+uint32_t exports_cosmonic_llama_cpp_api_method_model_n_swa(model_t * self) {
+    return (uint32_t) llama_model_n_swa(self->model);
+}
+
+// --- context ---
 
 static bool context_create(
         model_t * model, exports_cosmonic_llama_cpp_api_context_params_t * maybe_params,
         exports_cosmonic_llama_cpp_api_own_context_t * ret, provider_string_t * err) {
     struct llama_context_params cp = llama_context_default_params();
-    // Treat 0 as "unset": the WIT records these as plain u32 (not option) but documents
-    // per-field defaults, and n_batch == 0 would make append-tokens loop forever.
-    cp.n_ctx   = (maybe_params && maybe_params->n_ctx)   ? maybe_params->n_ctx   : 4096;
-    cp.n_batch = (maybe_params && maybe_params->n_batch) ? maybe_params->n_batch : 512;
-    // llama.cpp caps its own batch at n_ctx; chunking by a larger one would trip
-    // an assert inside llama_decode.
-    if (cp.n_batch > cp.n_ctx) {
-        cp.n_batch = cp.n_ctx;
+    if (maybe_params) {
+        // llama.cpp only rejects n_batch == 0 together with n_ubatch == 0
+        if (maybe_params->n_batch == 0) {
+            set_err(err, "n-batch must not be 0");
+            return false;
+        }
+        cp.n_ctx      = maybe_params->n_ctx;
+        cp.n_batch    = maybe_params->n_batch;
+        cp.n_ubatch   = maybe_params->n_ubatch;
+        cp.embeddings = maybe_params->embeddings;
     }
-    bool embeddings = maybe_params && maybe_params->embeddings;
-    if (embeddings) {
-        // Encoder models cannot split an input across micro-batches.
-        cp.embeddings = true;
-        cp.n_ubatch = cp.n_batch;
-    }
-    // WASI is single-threaded (pthread stubs); force ggml to compute on one thread.
-    cp.n_threads       = 1;
-    cp.n_threads_batch = 1;
     struct llama_context * c = llama_init_from_model(model->model, cp);
     if (!c) {
         set_err(err, "failed to create context");
@@ -425,10 +393,7 @@ static bool context_create(
     }
     context_t * rep = (context_t *) malloc(sizeof(context_t));
     rep->ctx = c;
-    rep->model = model;
-    rep->batch_size = cp.n_batch;
-    rep->past = 0;
-    rep->embeddings = embeddings;
+    rep->model = model_retain(model);
     *ret = exports_cosmonic_llama_cpp_api_context_new(rep);
     return true;
 }
@@ -442,307 +407,281 @@ provider_callback_code_t exports_cosmonic_llama_cpp_api_static_context_create(
     return PROVIDER_CALLBACK_CODE_EXIT;
 }
 
-UNREACHABLE_CALLBACK(exports_cosmonic_llama_cpp_api_static_context_create_callback)
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_context_create_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_static_context_create never returns yield/wait
+    abort();
+}
 
 void exports_cosmonic_llama_cpp_api_context_destructor(context_t * rep) {
-    ensure_stack();  // wasip3: resource-drop callbacks run with SP=0; set it first
     llama_free(rep->ctx);
+    model_release(rep->model);
     free(rep);
 }
 
-static bool context_append(
-        context_t * self, provider_string_t * text, provider_string_t * err) {
+uint32_t exports_cosmonic_llama_cpp_api_method_context_n_ctx(context_t * self) {
+    return llama_n_ctx(self->ctx);
+}
 
-    const char * t = (const char *) text->ptr;
-    int32_t len = (int32_t) text->len;
-    bool add_special = self->past == 0;
-    int n = -llama_tokenize(self->model->vocab, t, len, NULL, 0, add_special, true);
-    uint32_t * toks = (uint32_t *) malloc(sizeof(uint32_t) * (n ? (size_t) n : 1));
-    if (llama_tokenize(self->model->vocab, t, len, (llama_token *) toks, n, add_special, true) < 0) {
-        free(toks);
-        set_err(err, "failed to tokenize");
-        return false;
+uint32_t exports_cosmonic_llama_cpp_api_method_context_n_batch(context_t * self) {
+    return llama_n_batch(self->ctx);
+}
+
+uint32_t exports_cosmonic_llama_cpp_api_method_context_n_ubatch(context_t * self) {
+    return llama_n_ubatch(self->ctx);
+}
+
+exports_cosmonic_llama_cpp_api_pooling_type_t exports_cosmonic_llama_cpp_api_method_context_pooling_type(context_t * self) {
+    // The WIT enum is llama_pooling_type shifted up by one, from UNSPECIFIED = -1
+    return (exports_cosmonic_llama_cpp_api_pooling_type_t) (llama_pooling_type(self->ctx) + 1);
+}
+
+static int32_t context_decode(context_t * self, provider_list_u32_t * tokens) {
+    // These are asserts in llama_decode, which would trap the component
+    uint32_t n = (uint32_t) tokens->len;
+    bool whole_ubatch = !llama_get_causal_attn(self->ctx) || !llama_get_memory(self->ctx);
+    if (n > llama_n_batch(self->ctx) || (whole_ubatch && n > llama_n_ubatch(self->ctx))) {
+        return -1;
     }
-    bool ok = append_tokens(self, toks, (size_t) n, err);
-    free(toks);
-    return ok;
+    return llama_decode(self->ctx, llama_batch_get_one((llama_token *) tokens->ptr, (int32_t) n));
 }
 
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append(
-        context_t * self, provider_string_t * text) {
-    exports_cosmonic_llama_cpp_api_result_void_string_t ret;
-    ret.is_err = !context_append(self, text, &ret.val.err);
-    provider_string_free(text);
-    exports_cosmonic_llama_cpp_api_method_context_append_return(ret);
-    return PROVIDER_CALLBACK_CODE_EXIT;
-}
-
-UNREACHABLE_CALLBACK(exports_cosmonic_llama_cpp_api_method_context_append_callback)
-
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_append_tokens(
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_decode(
         context_t * self, provider_list_u32_t * tokens) {
-    exports_cosmonic_llama_cpp_api_result_void_string_t ret;
-    ret.is_err = !append_tokens(self, tokens->ptr, tokens->len, &ret.val.err);
+    exports_cosmonic_llama_cpp_api_result_void_s32_t ret;
+    int32_t code = context_decode(self, tokens);
+    ret.is_err = code != 0;
+    ret.val.err = code;
     provider_list_u32_free(tokens);
-    exports_cosmonic_llama_cpp_api_method_context_append_tokens_return(ret);
+    exports_cosmonic_llama_cpp_api_method_context_decode_return(ret);
     return PROVIDER_CALLBACK_CODE_EXIT;
 }
 
-UNREACHABLE_CALLBACK(exports_cosmonic_llama_cpp_api_method_context_append_tokens_callback)
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_decode_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_method_context_decode never returns yield/wait
+    abort();
+}
 
-static bool context_embed(
-        context_t * self, provider_list_u32_t * tokens,
-        provider_list_f32_t * ret, provider_string_t * err) {
-    if (!self->embeddings) {
-        set_err(err, "the context was not created with embeddings");
-        return false;
-    }
-    size_t n = tokens->len;
-    if (n == 0) {
-        set_err(err, "there are no tokens to embed");
-        return false;
-    }
-    if (!tokens_in_range(self->model, tokens->ptr, n)) {
-        set_err(err, "token out of range");
-        return false;
-    }
-    if (n > self->batch_size) {
-        char msg[128];
-        snprintf(msg, sizeof(msg), "input of %zu tokens does not fit in a batch of %u", n, self->batch_size);
-        set_err(err, msg);
-        return false;
-    }
-    if (llama_pooling_type(self->ctx) == LLAMA_POOLING_TYPE_RANK) {
-        set_err(err, "reranking models do not produce embeddings");
-        return false;
-    }
+void exports_cosmonic_llama_cpp_api_method_context_memory_clear(context_t * self, bool data) {
+    llama_memory_clear(llama_get_memory(self->ctx), data);
+}
 
-    llama_memory_t memory = llama_get_memory(self->ctx);
-    if (memory) {
-        llama_memory_clear(memory, true);
-    }
-    self->past = 0;
-
-    struct llama_batch batch = llama_batch_init((int32_t) n, 0, 1);
-    for (size_t i = 0; i < n; i++) {
-        batch.token[i] = (llama_token) tokens->ptr[i];
-        batch.pos[i] = (llama_pos) i;
-        batch.n_seq_id[i] = 1;
-        batch.seq_id[i][0] = 0;
-        batch.logits[i] = true;
-    }
-    batch.n_tokens = (int32_t) n;
-    if (llama_decode(self->ctx, batch)) {
-        llama_batch_free(batch);
-        set_err(err, "decode failed");
+bool exports_cosmonic_llama_cpp_api_method_context_memory_seq_rm(
+        context_t * self, int32_t seq_id, int32_t p0, int32_t p1) {
+    // llama.cpp asserts on a seq_id outside [-1, n_seq_max)
+    if (seq_id < 0) {
+        seq_id = -1;
+    } else if ((uint32_t) seq_id >= llama_n_seq_max(self->ctx)) {
         return false;
     }
+    return llama_memory_seq_rm(llama_get_memory(self->ctx), seq_id, p0, p1);
+}
 
-    size_t n_embd = (size_t) llama_model_n_embd_out(self->model->model);
-    float * out = (float *) calloc(n_embd, sizeof(float));
-    const float * pooled = llama_get_embeddings_seq(self->ctx, 0);
-    if (pooled) {
-        memcpy(out, pooled, n_embd * sizeof(float));
-    } else {
-        // Generative models have no pooling of their own: average the tokens.
-        for (size_t i = 0; i < n; i++) {
-            const float * token = llama_get_embeddings_ith(self->ctx, (int32_t) i);
-            if (!token) {
-                free(out);
-                llama_batch_free(batch);
-                set_err(err, "the model produced no token embeddings");
-                return false;
-            }
-            for (size_t j = 0; j < n_embd; j++) {
-                out[j] += token[j] / (float) n;
-            }
-        }
+int32_t exports_cosmonic_llama_cpp_api_method_context_memory_seq_pos_min(context_t * self, int32_t seq_id) {
+    if (seq_id < 0 || (uint32_t) seq_id >= llama_n_seq_max(self->ctx)) {
+        return -1;
     }
-    llama_batch_free(batch);
-    if (memory) {
-        llama_memory_clear(memory, true);
-    }
+    return llama_memory_seq_pos_min(llama_get_memory(self->ctx), seq_id);
+}
 
-    ret->ptr = out;
-    ret->len = n_embd;
+int32_t exports_cosmonic_llama_cpp_api_method_context_memory_seq_pos_max(context_t * self, int32_t seq_id) {
+    if (seq_id < 0 || (uint32_t) seq_id >= llama_n_seq_max(self->ctx)) {
+        return -1;
+    }
+    return llama_memory_seq_pos_max(llama_get_memory(self->ctx), seq_id);
+}
+
+static bool floats_dup(const float * src, size_t len, provider_list_f32_t * ret) {
+    if (!src) {
+        return false;
+    }
+    ret->ptr = (float *) malloc(len ? len * sizeof(float) : 1);
+    memcpy(ret->ptr, src, len * sizeof(float));
+    ret->len = len;
     return true;
 }
 
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_embed(
-        context_t * self, provider_list_u32_t * tokens) {
-    exports_cosmonic_llama_cpp_api_result_list_f32_string_t ret;
-    ret.is_err = !context_embed(self, tokens, &ret.val.ok, &ret.val.err);
-    provider_list_u32_free(tokens);
-    exports_cosmonic_llama_cpp_api_method_context_embed_return(ret);
-    return PROVIDER_CALLBACK_CODE_EXIT;
-}
-
-UNREACHABLE_CALLBACK(exports_cosmonic_llama_cpp_api_method_context_embed_callback)
-
-uint32_t exports_cosmonic_llama_cpp_api_method_context_n_past(context_t * self) {
-    return self->past;
-}
-
-void exports_cosmonic_llama_cpp_api_method_context_clear(context_t * self) {
-    llama_memory_clear(llama_get_memory(self->ctx), true);
-    self->past = 0;
-}
-
-static bool context_truncate(context_t * self, uint32_t n, provider_string_t * err) {
-    if (n == self->past) {
-        return true;
+bool exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith(
+        context_t * self, int32_t i, provider_list_f32_t * ret) {
+    // llama.cpp only fills per-token embeddings without pooling
+    if (llama_pooling_type(self->ctx) != LLAMA_POOLING_TYPE_NONE) {
+        return false;
     }
-    llama_memory_t memory = llama_get_memory(self->ctx);
-    if (n > self->past) {
-        set_err(err, "the context holds fewer tokens than that");
-    } else if (n == 0) {
-        llama_memory_clear(memory, true);
-        self->past = 0;
-        return true;
-    } else {
-        // With sliding-window attention the cache drops old positions, and the
-        // token after the prefix attends to the n_swa before it.
-        int32_t oldest_needed = (int32_t) n - llama_model_n_swa(self->model->model);
-        llama_pos pos_min = llama_memory_seq_pos_min(memory, 0);
-        if (pos_min < 0 || pos_min > (oldest_needed > 0 ? oldest_needed : 0)) {
-            set_err(err, "the context no longer holds the tokens before that point");
-        } else if (!llama_memory_seq_rm(memory, 0, (llama_pos) n, -1)) {
-            set_err(err, "the model cannot forget tokens from the end of the context");
-        } else {
-            self->past = n;
-            return true;
-        }
-    }
-    llama_memory_clear(memory, true);
-    self->past = 0;
-    return false;
+    size_t n_embd = (size_t) llama_model_n_embd_out(self->model->model);
+    return floats_dup(llama_get_embeddings_ith(self->ctx, i), n_embd, ret);
 }
 
-bool exports_cosmonic_llama_cpp_api_method_context_truncate(
-        context_t * self, uint32_t n, provider_string_t * err) {
-    ensure_stack();
-    return context_truncate(self, n, err);
+bool exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq(
+        context_t * self, int32_t seq_id, provider_list_f32_t * ret) {
+    size_t len = llama_pooling_type(self->ctx) == LLAMA_POOLING_TYPE_RANK
+        ? (size_t) llama_model_n_cls_out(self->model->model)
+        : (size_t) llama_model_n_embd_out(self->model->model);
+    return floats_dup(llama_get_embeddings_seq(self->ctx, seq_id), len, ret);
 }
 
 // --- sampler ---
 
-static void sampler_add_logit_bias(
-        struct llama_sampler * chain, const model_t * model,
-        const exports_cosmonic_llama_cpp_api_list_logit_bias_t * biases) {
-    if (biases->len == 0) {
-        return;
-    }
-    int32_t n_vocab = llama_vocab_n_tokens(model->vocab);
-    llama_logit_bias * valid = (llama_logit_bias *) malloc(sizeof(*valid) * biases->len);
-    int32_t n = 0;
-    for (size_t i = 0; i < biases->len; i++) {
-        if (biases->ptr[i].token < (uint32_t) n_vocab) {
-            valid[n].token = (llama_token) biases->ptr[i].token;
-            valid[n].bias = biases->ptr[i].bias;
-            n++;
-        }
-    }
-    llama_sampler_chain_add(chain, llama_sampler_init_logit_bias(n_vocab, n, valid));
-    free(valid);
-}
-
-static bool sampler_create(
-        model_t * model, exports_cosmonic_llama_cpp_api_sampler_params_t * p,
-        exports_cosmonic_llama_cpp_api_own_sampler_t * ret, provider_string_t * err) {
-    struct llama_sampler * chain = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    if (!p) {
-        llama_sampler_chain_add(chain, llama_sampler_init_greedy());
-        sampler_t * rep = (sampler_t *) malloc(sizeof(sampler_t));
-        rep->smpl = chain;
-        *ret = exports_cosmonic_llama_cpp_api_sampler_new(rep);
-        return true;
-    }
-
-    // First, so no token the grammar forbids survives into the rest of the chain.
-    if (p->grammar.is_some) {
-        char * grammar = (char *) malloc(p->grammar.val.len + 1);
-        memcpy(grammar, p->grammar.val.ptr, p->grammar.val.len);
-        grammar[p->grammar.val.len] = '\0';
-        struct llama_sampler * constrained = llama_sampler_init_grammar(model->vocab, grammar, "root");
-        free(grammar);
-        if (!constrained) {
-            llama_sampler_free(chain);
-            set_err(err, "the grammar does not parse");
-            return false;
-        }
-        llama_sampler_chain_add(chain, constrained);
-    }
-
-    // Same order as llama.cpp's common sampler: bias and penalties shape the
-    // logits before anything truncates or picks.
-    sampler_add_logit_bias(chain, model, &p->logit_bias);
-    int32_t last_n = p->penalty_last_n > INT32_MAX ? INT32_MAX : (int32_t) p->penalty_last_n;
-    llama_sampler_chain_add(chain, llama_sampler_init_penalties(
-        last_n, p->repeat_penalty, p->frequency_penalty, p->presence_penalty));
-    if (p->temp <= 0) {
-        llama_sampler_chain_add(chain, llama_sampler_init_greedy());
-    } else {
-        if (p->top_k > 0) { llama_sampler_chain_add(chain, llama_sampler_init_top_k(p->top_k)); }
-        if (p->top_p < 1) { llama_sampler_chain_add(chain, llama_sampler_init_top_p(p->top_p, 1)); }
-        if (p->min_p > 0) { llama_sampler_chain_add(chain, llama_sampler_init_min_p(p->min_p, 1)); }
-        llama_sampler_chain_add(chain, llama_sampler_init_temp(p->temp));
-        llama_sampler_chain_add(chain, llama_sampler_init_dist(p->seed));
-    }
+static exports_cosmonic_llama_cpp_api_own_sampler_t sampler_new(struct llama_sampler * smpl, model_t * model) {
     sampler_t * rep = (sampler_t *) malloc(sizeof(sampler_t));
-    rep->smpl = chain;
-    *ret = exports_cosmonic_llama_cpp_api_sampler_new(rep);
-    return true;
-}
-
-bool exports_cosmonic_llama_cpp_api_static_sampler_create(
-        exports_cosmonic_llama_cpp_api_borrow_model_t model,
-        exports_cosmonic_llama_cpp_api_sampler_params_t * maybe_params,
-        exports_cosmonic_llama_cpp_api_own_sampler_t * ret, provider_string_t * err) {
-    ensure_stack();
-    bool ok = sampler_create(model, maybe_params, ret, err);
-    if (maybe_params) {
-        exports_cosmonic_llama_cpp_api_sampler_params_free(maybe_params);
-    }
-    return ok;
-}
-
-// Defined in grammar.cpp.
-bool llama_wit_json_schema_to_grammar(const char * schema, size_t len, char ** out, char ** err);
-
-bool exports_cosmonic_llama_cpp_api_json_schema_to_grammar(
-        provider_string_t * schema, provider_string_t * ret, provider_string_t * err) {
-    ensure_stack();
-    char * grammar = NULL;
-    char * message = NULL;
-    bool ok = llama_wit_json_schema_to_grammar((const char *) schema->ptr, schema->len, &grammar, &message);
-    if (ok) {
-        provider_string_dup(ret, grammar);
-        free(grammar);
-    } else {
-        provider_string_dup(err, message ? message : "the schema could not be converted");
-        free(message);
-    }
-    provider_string_free(schema);
-    return ok;
+    rep->smpl = smpl;
+    rep->model = model_retain(model);
+    rep->cur = NULL;
+    rep->cur_cap = 0;
+    return exports_cosmonic_llama_cpp_api_sampler_new(rep);
 }
 
 void exports_cosmonic_llama_cpp_api_sampler_destructor(sampler_t * rep) {
-    ensure_stack();  // wasip3: resource-drop callbacks run with SP=0; set it first
-    llama_sampler_free(rep->smpl);
+    // NULL once a chain owns it
+    if (rep->smpl) {
+        llama_sampler_free(rep->smpl);
+    }
+    model_release(rep->model);
+    free(rep->cur);
     free(rep);
 }
 
-provider_callback_code_t exports_cosmonic_llama_cpp_api_method_sampler_sample(
-        sampler_t * self, context_t * ctx) {
-    // No error channel (returns u32): an empty context has no logits at index -1,
-    // so fail loudly instead of sampling garbage. Caller must append a prompt first.
-    if (ctx->past == 0) {
-        fputs("sampler.sample: context is empty (append a prompt first)\n", stderr);
-        abort();
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_chain_init(void) {
+    return sampler_new(llama_sampler_chain_init(llama_sampler_chain_default_params()), NULL);
+}
+
+bool exports_cosmonic_llama_cpp_api_method_sampler_chain_add(
+        sampler_t * self, exports_cosmonic_llama_cpp_api_own_sampler_t smpl, provider_string_t * err) {
+    sampler_t * added = exports_cosmonic_llama_cpp_api_sampler_rep(smpl);
+    // chain_get(-1) returns the sampler itself only for a chain
+    bool ok = false;
+    if (llama_sampler_chain_get(self->smpl, -1) == NULL) {
+        set_err(err, "the sampler is not a chain");
+    } else if (self->model && added->model && self->model != added->model) {
+        set_err(err, "the samplers were made for different models");
+    } else {
+        llama_sampler_chain_add(self->smpl, added->smpl);
+        added->smpl = NULL;
+        // The chain now holds the added sampler's model reference
+        if (!self->model) {
+            self->model = added->model;
+            added->model = NULL;
+        }
+        ok = true;
     }
-    exports_cosmonic_llama_cpp_api_method_sampler_sample_return(
-        llama_sampler_sample(self->smpl, ctx->ctx, -1));
+    exports_cosmonic_llama_cpp_api_sampler_drop_own(smpl);
+    return ok;
+}
+
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_greedy(void) {
+    return sampler_new(llama_sampler_init_greedy(), NULL);
+}
+
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_dist(uint32_t seed) {
+    return sampler_new(llama_sampler_init_dist(seed), NULL);
+}
+
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_top_k(int32_t k) {
+    return sampler_new(llama_sampler_init_top_k(k), NULL);
+}
+
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_top_p(float p, uint32_t min_keep) {
+    return sampler_new(llama_sampler_init_top_p(p, min_keep), NULL);
+}
+
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_min_p(float p, uint32_t min_keep) {
+    return sampler_new(llama_sampler_init_min_p(p, min_keep), NULL);
+}
+
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_temp(float t) {
+    return sampler_new(llama_sampler_init_temp(t), NULL);
+}
+
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_penalties(
+        model_t * model, int32_t penalty_last_n, float penalty_repeat, float penalty_freq, float penalty_present) {
+    return sampler_new(llama_sampler_init_penalties(
+        llama_vocab_n_tokens(model->vocab), penalty_last_n, penalty_repeat, penalty_freq, penalty_present), model);
+}
+
+exports_cosmonic_llama_cpp_api_own_sampler_t exports_cosmonic_llama_cpp_api_static_sampler_init_logit_bias(
+        model_t * model, exports_cosmonic_llama_cpp_api_list_logit_bias_t * logit_bias) {
+    int32_t n_vocab = llama_vocab_n_tokens(model->vocab);
+    llama_logit_bias * valid = (llama_logit_bias *) malloc(sizeof(*valid) * (logit_bias->len ? logit_bias->len : 1));
+    int32_t n = 0;
+    for (size_t i = 0; i < logit_bias->len; i++) {
+        if (logit_bias->ptr[i].token < (uint32_t) n_vocab) {
+            valid[n].token = (llama_token) logit_bias->ptr[i].token;
+            valid[n].bias = logit_bias->ptr[i].bias;
+            n++;
+        }
+    }
+    struct llama_sampler * smpl = llama_sampler_init_logit_bias(n_vocab, n, valid);
+    free(valid);
+    exports_cosmonic_llama_cpp_api_list_logit_bias_free(logit_bias);
+    return sampler_new(smpl, model);
+}
+
+bool exports_cosmonic_llama_cpp_api_static_sampler_init_grammar(
+        model_t * model, provider_string_t * grammar_str, provider_string_t * grammar_root,
+        exports_cosmonic_llama_cpp_api_own_sampler_t * ret, provider_string_t * err) {
+    char * str = cstr(grammar_str);
+    char * root = cstr(grammar_root);
+    struct llama_sampler * smpl = llama_sampler_init_grammar(model->vocab, str, root);
+    free(str);
+    free(root);
+    provider_string_free(grammar_str);
+    provider_string_free(grammar_root);
+    if (!smpl) {
+        set_err(err, "the grammar does not parse");
+        return false;
+    }
+    *ret = sampler_new(smpl, model);
+    return true;
+}
+
+// llama_sampler_sample, spelled out as llama.h documents it, so a chain that picks no
+// token or picks one the grammar ruled out fails here instead of asserting in llama.cpp
+static bool sampler_sample(sampler_t * self, context_t * ctx, int32_t idx, uint32_t * ret, provider_string_t * err) {
+    // The grammar sampler indexes the vocabulary it was built with
+    if (self->model && self->model != ctx->model) {
+        set_err(err, "the sampler was made for a different model than the context's");
+        return false;
+    }
+    const float * logits = llama_get_logits_ith(ctx->ctx, idx);
+    if (!logits) {
+        set_err(err, "no logits for that output (decode tokens first)");
+        return false;
+    }
+    size_t n_vocab = (size_t) llama_vocab_n_tokens(ctx->model->vocab);
+    if (self->cur_cap < n_vocab) {
+        free(self->cur);
+        self->cur = (llama_token_data *) malloc(n_vocab * sizeof(llama_token_data));
+        self->cur_cap = n_vocab;
+    }
+    for (size_t i = 0; i < n_vocab; i++) {
+        self->cur[i] = (llama_token_data) { (llama_token) i, logits[i], 0.0f };
+    }
+    llama_token_data_array cur_p = { self->cur, n_vocab, -1, false };
+    llama_sampler_apply(self->smpl, &cur_p);
+    if (cur_p.selected < 0 || (size_t) cur_p.selected >= cur_p.size) {
+        set_err(err, "the sampler picked no token (end the chain with greedy or dist)");
+        return false;
+    }
+    llama_token_data picked = cur_p.data[cur_p.selected];
+    if (isinf(picked.logit) && picked.logit < 0) {
+        set_err(err, "the sampler picked a token that was ruled out (put the grammar earlier in the chain)");
+        return false;
+    }
+    llama_sampler_accept(self->smpl, picked.id);
+    *ret = (uint32_t) picked.id;
+    return true;
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_sampler_sample(
+        sampler_t * self, context_t * ctx, int32_t idx) {
+    exports_cosmonic_llama_cpp_api_result_u32_string_t ret;
+    ret.is_err = !sampler_sample(self, ctx, idx, &ret.val.ok, &ret.val.err);
+    exports_cosmonic_llama_cpp_api_method_sampler_sample_return(ret);
     return PROVIDER_CALLBACK_CODE_EXIT;
 }
 
-UNREACHABLE_CALLBACK(exports_cosmonic_llama_cpp_api_method_sampler_sample_callback)
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_sampler_sample_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_method_sampler_sample never returns yield/wait
+    abort();
+}

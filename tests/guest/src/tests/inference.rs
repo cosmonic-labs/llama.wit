@@ -1,5 +1,6 @@
 use crate::cosmonic::llama_cpp::api::{
-    self, Context, ContextParams, LogitBias, Model, ModelParams, Sampler, SamplerParams,
+    ChatMessage, Context, ContextParams, LogitBias, Model, ModelParams, PoolingType, Sampler,
+    chat_apply_template,
 };
 use crate::models;
 
@@ -11,20 +12,27 @@ pub async fn load(source: &models::HfModel) -> Result<Model, String> {
     .await
 }
 
-fn params() -> SamplerParams {
-    SamplerParams {
-        temp: 0.0,
-        top_k: 0,
-        top_p: 1.0,
-        min_p: 0.0,
-        seed: 42,
-        penalty_last_n: 64,
-        repeat_penalty: 1.0,
-        frequency_penalty: 0.0,
-        presence_penalty: 0.0,
-        logit_bias: Vec::new(),
-        grammar: None,
+pub fn chain(samplers: Vec<Sampler>) -> Result<Sampler, String> {
+    let chain = Sampler::chain_init();
+    for sampler in samplers {
+        chain.chain_add(sampler)?;
     }
+    Ok(chain)
+}
+
+pub fn greedy() -> Result<Sampler, String> {
+    chain(vec![Sampler::init_greedy()])
+}
+
+pub async fn decode(context: &Context, tokens: Vec<u32>) -> Result<(), String> {
+    context
+        .decode(tokens)
+        .await
+        .map_err(|code| format!("decode failed: {code}"))
+}
+
+pub async fn prompt(model: &Model, context: &Context, text: &str) -> Result<(), String> {
+    decode(context, model.tokenize(text, true, true)?).await
 }
 
 pub async fn generate(
@@ -35,12 +43,12 @@ pub async fn generate(
 ) -> Result<Vec<u32>, String> {
     let mut tokens = Vec::new();
     for _ in 0..limit {
-        let token = sampler.sample(context).await;
+        let token = sampler.sample(context, -1).await?;
         if model.is_eog(token) {
             break;
         }
         tokens.push(token);
-        context.append_tokens(vec![token]).await?;
+        decode(context, vec![token]).await?;
     }
     Ok(tokens)
 }
@@ -48,7 +56,7 @@ pub async fn generate(
 fn pieces(model: &Model, tokens: &[u32]) -> Result<Vec<u8>, String> {
     let mut bytes = Vec::new();
     for &token in tokens {
-        bytes.extend(model.token_to_piece(token, false)?);
+        bytes.extend(model.token_to_piece(token, 0, false)?);
     }
     Ok(bytes)
 }
@@ -56,28 +64,72 @@ fn pieces(model: &Model, tokens: &[u32]) -> Result<Vec<u8>, String> {
 pub async fn token_bytes() -> Result<(), String> {
     let model = load(&models::STORIES_260K).await?;
     for text in ["Once upon a time", "你好世界 🦀🎉 café"] {
-        let tokens = model.tokenize(text, false)?;
+        let tokens = model.tokenize(text, false, true)?;
         let bytes = pieces(&model, &tokens)?;
         let decoded = String::from_utf8(bytes).map_err(|e| e.to_string())?;
         if decoded.trim_start() != text {
             return Err(format!("token round trip: {decoded:?} != {text:?}"));
         }
-        if model.detokenize(&tokens)? != decoded {
+        // llama_detokenize drops the space SentencePiece puts before the first word
+        if model.detokenize(&tokens, false, false)? != text {
             return Err("detokenize changed the complete text".into());
         }
-        let mut streamed = String::new();
-        for token in tokens {
-            streamed.push_str(&model.detokenize(&[token])?);
-        }
-        if text.is_ascii() && streamed != decoded {
-            return Err("per-token detokenize stripped spaces".into());
+        let first = model.token_to_piece(tokens[0], 1, false)?;
+        if first.first() == Some(&b' ') {
+            return Err("lstrip kept the leading space".into());
         }
     }
-    if model.token_to_piece(u32::MAX, false).is_ok()
-        || model.detokenize(&[u32::MAX]).is_ok()
+    if model.token_to_piece(u32::MAX, 0, false).is_ok()
+        || model.detokenize(&[u32::MAX], false, false).is_ok()
         || model.is_eog(u32::MAX)
     {
         return Err("invalid token id was accepted".into());
+    }
+    Ok(())
+}
+
+pub async fn chat_template() -> Result<(), String> {
+    let model = load(&models::STORIES_260K).await?;
+    if model.chat_template(None).is_some() {
+        return Err("stories260K has no chat template".into());
+    }
+    let chat = [ChatMessage {
+        role: "user".into(),
+        content: "Hi".into(),
+    }];
+    let prompt = chat_apply_template("chatml", &chat, true)?;
+    if prompt != "<|im_start|>user\nHi<|im_end|>\n<|im_start|>assistant\n" {
+        return Err(format!("unexpected chatml prompt: {prompt:?}"));
+    }
+    if chat_apply_template("not a template", &chat, true).is_ok() {
+        return Err("unknown template was accepted".into());
+    }
+    Ok(())
+}
+
+pub async fn model_lifetime() -> Result<(), String> {
+    let model = load(&models::STORIES_260K).await?;
+    let context = Context::create(&model, None).await?;
+    let sampler = chain(vec![
+        Sampler::init_grammar(&model, r#"root ::= "a""#, "root")?,
+        Sampler::init_greedy(),
+    ])?;
+    let tokens = model.tokenize("Once upon a time", true, true)?;
+    drop(model);
+    decode(&context, tokens).await?;
+    sampler.sample(&context, -1).await?;
+
+    let other = load(&models::STORIES_260K).await?;
+    let other_context = Context::create(&other, None).await?;
+    prompt(&other, &other_context, "Once upon a time").await?;
+    if sampler.sample(&other_context, -1).await.is_ok() {
+        return Err("sampled a context of another model".into());
+    }
+    if sampler
+        .chain_add(Sampler::init_penalties(&other, 64, 1.1, 0.0, 0.0))
+        .is_ok()
+    {
+        return Err("chained samplers of two models".into());
     }
     Ok(())
 }
@@ -89,43 +141,66 @@ pub async fn context_limits() -> Result<(), String> {
         Some(ContextParams {
             n_ctx: 256,
             n_batch: 1024,
+            n_ubatch: 0,
             embeddings: false,
         }),
     )
     .await?;
-    let token = *model.tokenize("a", false)?.last().ok_or("no token")?;
-    context.append_tokens(vec![token; 4]).await?;
-    if context.append_tokens(vec![u32::MAX]).await.is_ok() || context.n_past() != 4 {
-        return Err("invalid token changed the context".into());
+    if context.n_ctx() != 256 || context.n_batch() != 256 || context.n_ubatch() != 256 {
+        return Err("n-batch was not capped at n-ctx".into());
     }
-    if context.append_tokens(vec![token; 256]).await.is_ok() || context.n_past() != 4 {
-        return Err("overflow changed the context".into());
+    let sampler = greedy()?;
+    if sampler.sample(&context, -1).await.is_ok() {
+        return Err("sampled before any decode".into());
     }
-    context.truncate(2)?;
-    if context.n_past() != 2 {
-        return Err("truncate did not keep the prefix".into());
+    if Sampler::init_greedy().chain_add(Sampler::init_greedy()).is_ok() {
+        return Err("added to a sampler that is not a chain".into());
     }
-    if context.truncate(999).is_ok() || context.n_past() != 0 {
-        return Err("invalid truncate did not clear the context".into());
+    let token = *model.tokenize("a", false, true)?.last().ok_or("no token")?;
+    decode(&context, vec![token; 4]).await?;
+    for picks_nothing in [Sampler::chain_init(), chain(vec![Sampler::init_top_k(1)])?] {
+        if picks_nothing.sample(&context, -1).await.is_ok() {
+            return Err("a chain without greedy or dist sampled".into());
+        }
+    }
+    for (tokens, code) in [(vec![], -1), (vec![u32::MAX], -1), (vec![token; 257], -1), (vec![token; 256], 1)] {
+        if context.decode(tokens).await != Err(code) || context.memory_seq_pos_max(0) != 3 {
+            return Err(format!("a decode that should fail with {code} changed the context"));
+        }
+    }
+    if !context.memory_seq_rm(0, 2, -1) || context.memory_seq_pos_max(0) != 1 {
+        return Err("memory-seq-rm did not keep the prefix".into());
+    }
+    context.memory_clear(true);
+    if context.memory_seq_pos_min(0) != -1 || context.memory_seq_pos_max(0) != -1 {
+        return Err("memory-clear left tokens".into());
+    }
+    // llama.cpp asserts on these sequence ids
+    if context.memory_seq_rm(1, 0, -1) || context.memory_seq_pos_min(-1) != -1 || context.memory_seq_pos_max(1) != -1 {
+        return Err("an invalid sequence id was accepted".into());
+    }
+    if !context.memory_seq_rm(-2, 0, -1) {
+        return Err("a negative sequence id did not match every sequence".into());
     }
     Ok(())
 }
 
 pub async fn sampling() -> Result<(), String> {
     let model = load(&models::STORIES_260K).await?;
-    let token = *model.tokenize("0", false)?.last().ok_or("no token")?;
+    let token = *model.tokenize("0", false, true)?.last().ok_or("no token")?;
     for bias in [100.0, -100.0] {
         let context = Context::create(&model, None).await?;
-        context.append("Once upon a time".into()).await?;
-        let mut options = params();
-        options.logit_bias = vec![LogitBias { token, bias }];
-        let sampler = Sampler::create(&model, Some(&options))?;
+        prompt(&model, &context, "Once upon a time").await?;
+        let sampler = chain(vec![
+            Sampler::init_logit_bias(&model, &[LogitBias { token, bias }]),
+            Sampler::init_greedy(),
+        ])?;
         for _ in 0..4 {
-            let sampled = sampler.sample(&context).await;
+            let sampled = sampler.sample(&context, -1).await?;
             if (sampled == token) != (bias > 0.0) {
                 return Err(format!("logit bias {bias} did not apply"));
             }
-            context.append_tokens(vec![sampled]).await?;
+            decode(&context, vec![sampled]).await?;
         }
     }
     Ok(())
@@ -133,27 +208,55 @@ pub async fn sampling() -> Result<(), String> {
 
 pub async fn grammar() -> Result<(), String> {
     let model = load(&models::STORIES_260K).await?;
-    let mut options = params();
-    options.grammar = Some("this is not a grammar".into());
-    if Sampler::create(&model, Some(&options)).is_ok() {
+    if Sampler::init_grammar(&model, "this is not a grammar", "root").is_ok() {
         return Err("invalid grammar was accepted".into());
     }
-    if api::json_schema_to_grammar("{not json").is_ok()
-        || api::json_schema_to_grammar(r#"{"type":"not-a-type"}"#).is_ok()
+    let grammar = r#"answer ::= "{\"answer\":\"Paris\"}""#;
+    let context = Context::create(&model, None).await?;
+    prompt(&model, &context, "Tell me a story.").await?;
+    // top-k first leaves only a token the grammar then rules out
+    let late = chain(vec![
+        Sampler::init_top_k(1),
+        Sampler::init_grammar(&model, grammar, "answer")?,
+        Sampler::init_greedy(),
+    ])?;
+    if late.sample(&context, -1).await.is_ok() {
+        return Err("sampled a token the grammar ruled out".into());
+    }
+    enforces(&model, r#"answer ::= "{\"answer\":\"Paris\"}""#, "answer").await
+}
+
+#[cfg(feature = "json-schema")]
+pub async fn json_schema() -> Result<(), String> {
+    use crate::cosmonic::llama_cpp::json_schema;
+
+    if json_schema::to_grammar("{not json").is_ok()
+        || json_schema::to_grammar(r#"{"type":"not-a-type"}"#).is_ok()
+        // The parse error quotes a cut-off UTF-8 sequence
+        || json_schema::to_grammar("é").is_ok()
     {
         return Err("invalid schema was accepted".into());
     }
-    options.grammar = Some(api::json_schema_to_grammar(
+    let model = load(&models::STORIES_260K).await?;
+    let grammar = json_schema::to_grammar(
         r#"{"type":"object","properties":{"answer":{"const":"Paris"}},"required":["answer"],"additionalProperties":false}"#,
-    )?);
-    let context = Context::create(&model, None).await?;
-    context.append("Tell me a story.".into()).await?;
-    let sampler = Sampler::create(&model, Some(&options))?;
-    let tokens = generate(&model, &context, &sampler, 64).await?;
+    )?;
+    enforces(&model, &grammar, "root").await
+}
+
+// Expects `grammar`, which allows only {"answer":"Paris"}, to hold a story prompt to it.
+async fn enforces(model: &Model, grammar: &str, root: &str) -> Result<(), String> {
+    let context = Context::create(model, None).await?;
+    prompt(model, &context, "Tell me a story.").await?;
+    let sampler = chain(vec![
+        Sampler::init_grammar(model, grammar, root)?,
+        Sampler::init_greedy(),
+    ])?;
+    let tokens = generate(model, &context, &sampler, 64).await?;
     let value: serde_json::Value =
-        serde_json::from_slice(&pieces(&model, &tokens)?).map_err(|e| e.to_string())?;
+        serde_json::from_slice(&pieces(model, &tokens)?).map_err(|e| e.to_string())?;
     if value != serde_json::json!({"answer":"Paris"}) {
-        return Err(format!("schema was not enforced: {value}"));
+        return Err(format!("grammar was not enforced: {value}"));
     }
     Ok(())
 }
@@ -165,21 +268,34 @@ pub async fn embeddings() -> Result<(), String> {
         Some(ContextParams {
             n_ctx: 256,
             n_batch: 256,
+            n_ubatch: 256,
             embeddings: true,
         }),
     )
     .await?;
-    let tokens = model.tokenize("Once upon a time", true)?;
-    let vector = context.embed(tokens).await?;
-    if vector.len() != model.n_embd() as usize
-        || vector.is_empty()
-        || !vector.iter().all(|x| x.is_finite())
-        || !vector.iter().any(|&x| x != 0.0)
-    {
-        return Err("invalid embedding vector".into());
+    // A generative model: no pooling, one vector per token
+    if context.pooling_type() != PoolingType::None {
+        return Err(format!("unexpected pooling: {:?}", context.pooling_type()));
     }
-    if context.n_past() != 0 {
-        return Err("embedding left tokens in the context".into());
+    let tokens = model.tokenize("Once upon a time", true, true)?;
+    let n = tokens.len() as i32;
+    decode(&context, tokens).await?;
+    if context.get_embeddings_seq(0).is_some() {
+        return Err("pooled embedding without pooling".into());
+    }
+    for i in [0, n - 1, -1] {
+        let vector = context
+            .get_embeddings_ith(i)
+            .ok_or(format!("no embedding for token {i}"))?;
+        if vector.len() != model.n_embd_out() as usize
+            || !vector.iter().all(|x| x.is_finite())
+            || !vector.iter().any(|&x| x != 0.0)
+        {
+            return Err("invalid embedding vector".into());
+        }
+    }
+    if context.get_embeddings_ith(n).is_some() {
+        return Err("embedding past the last token".into());
     }
     Ok(())
 }
@@ -198,23 +314,24 @@ pub async fn reuse(source: &models::HfModel, rounds: u32) -> Result<(), String> 
         } else {
             "Once upon a time there was a little boy."
         };
-        let tokens = model.tokenize(prompt, true)?;
-        let shared = cached
+        let tokens = model.tokenize(prompt, true, true)?;
+        let mut shared = cached
             .iter()
             .zip(&tokens)
             .take_while(|(a, b)| a == b)
             .count()
             .min(tokens.len().saturating_sub(1));
-        context.truncate(shared as u32)?;
-        context.append_tokens(tokens[shared..].to_vec()).await?;
-        let sampler = Sampler::create(&model, None)?;
-        let reused = generate(&model, &context, &sampler, 16).await?;
+        if !context.memory_seq_rm(0, shared as i32, -1) {
+            context.memory_clear(true);
+            shared = 0;
+        }
+        decode(&context, tokens[shared..].to_vec()).await?;
+        let reused = generate(&model, &context, &greedy()?, 16).await?;
         cached = tokens.clone();
         cached.extend(&reused);
         let fresh = Context::create(&model, None).await?;
-        fresh.append_tokens(tokens).await?;
-        let sampler = Sampler::create(&model, None)?;
-        let baseline = generate(&model, &fresh, &sampler, 16).await?;
+        decode(&fresh, tokens).await?;
+        let baseline = generate(&model, &fresh, &greedy()?, 16).await?;
         if reused != baseline {
             return Err(format!(
                 "prompt reuse differed from fresh inference in round {round}: {reused:?} != {baseline:?}"

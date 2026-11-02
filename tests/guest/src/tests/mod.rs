@@ -15,9 +15,13 @@ static TESTS: &[(&str, TestFn)] = &[
     ("live/embeddings", || Box::pin(live::embeddings())),
     ("live/prompt-reuse", || Box::pin(live::prompt_reuse())),
     ("token-bytes", || Box::pin(inference::token_bytes())),
+    ("chat-template", || Box::pin(inference::chat_template())),
+    ("model-lifetime", || Box::pin(inference::model_lifetime())),
     ("context-limits", || Box::pin(inference::context_limits())),
     ("sampling", || Box::pin(inference::sampling())),
     ("grammar", || Box::pin(inference::grammar())),
+    #[cfg(feature = "json-schema")]
+    ("json-schema", || Box::pin(inference::json_schema())),
     ("embeddings", || Box::pin(inference::embeddings())),
     ("prompt-reuse", || Box::pin(inference::prompt_reuse())),
 ];
