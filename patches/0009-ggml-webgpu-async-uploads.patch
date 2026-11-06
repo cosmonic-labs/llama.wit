@@ -1,0 +1,54 @@
+--- a/ggml/src/ggml-webgpu/ggml-webgpu.cpp
++++ b/ggml/src/ggml-webgpu/ggml-webgpu.cpp
+@@ -3972,11 +3972,19 @@
+     props->description = ggml_backend_webgpu_device_get_description(dev);
+     props->type        = ggml_backend_webgpu_device_get_type(dev);
+     ggml_backend_webgpu_device_get_memory(dev, &props->memory_free, &props->memory_total);
++#ifdef __wasi__
++    // set_tensor_async and the event functions are implemented; together with the
++    // host buffer type below they let llama.cpp's loader stream tensor data to the
++    // GPU through a few small staging buffers instead of a host copy of each tensor.
++    constexpr bool async_uploads = true;
++#else
++    constexpr bool async_uploads = false;
++#endif
+     props->caps = {
+-        /* .async                 = */ false,
+-        /* .host_buffer           = */ false,
++        /* .async                 = */ async_uploads,
++        /* .host_buffer           = */ async_uploads,
+         /* .buffer_from_host_ptr  = */ false,
+-        /* .events                = */ false,
++        /* .events                = */ async_uploads,
+         /* .mmap_support          = */ true,
+     };
+ }
+@@ -4672,6 +4680,16 @@
+     return supports_op;
+ }
+ 
++#ifdef __wasi__
++// Staging buffer type for async uploads. Under wasi:webgpu there is no pinned
++// memory, only linear memory, and queue.WriteBuffer copies its source at call
++// time, so plain CPU buffers serve.
++static ggml_backend_buffer_type_t ggml_backend_webgpu_device_get_host_buffer_type(ggml_backend_dev_t dev) {
++    GGML_UNUSED(dev);
++    return ggml_backend_cpu_buffer_type();
++}
++#endif
++
+ static struct ggml_backend_device_i ggml_backend_webgpu_device_i = {
+     /* .get_name             = */ ggml_backend_webgpu_device_get_name,
+     /* .get_description      = */ ggml_backend_webgpu_device_get_description,
+@@ -4680,7 +4698,11 @@
+     /* .get_props            = */ ggml_backend_webgpu_device_get_props,
+     /* .init_backend         = */ ggml_backend_webgpu_backend_init,
+     /* .get_buffer_type      = */ ggml_backend_webgpu_device_get_buffer_type,
++#ifdef __wasi__
++    /* .get_host_buffer_type = */ ggml_backend_webgpu_device_get_host_buffer_type,
++#else
+     /* .get_host_buffer_type = */ NULL,
++#endif
+     /* .buffer_from_host_ptr = */ NULL,
+     /* .supports_op          = */ ggml_backend_webgpu_device_supports_op,
+     /* .supports_buft        = */ ggml_backend_webgpu_device_supports_buft,

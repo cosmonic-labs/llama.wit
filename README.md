@@ -59,6 +59,7 @@ consumer builds the same source:
 | 0006 | ggml-webgpu's buffer size limit is capped at `SIZE_MAX/2` on 32-bit targets, so weight buffers split below 4 GiB |
 | 0007 | ggml-webgpu lowercases the adapter vendor, so its dp4a path also turns on for "NVIDIA" from wgpu-native |
 | 0008 | the loader visits tensors in file order across every context, so a stream-backed `FILE *` only seeks forward; a tied output is copied from `token_embd` instead of read twice |
+| 0009 | ggml-webgpu on WASI advertises async uploads, events and a host buffer type, so GPU-bound tensors stream through small staging buffers instead of a host copy each |
 
 The patches apply to exactly that tag, so move them together. With
 `-DFETCHCONTENT_SOURCE_DIR_LLAMA=/path/...` the local checkout is used as it is, unpatched.
@@ -70,8 +71,8 @@ tools (`llama-bench`, `llama-simple`) for wasm32-wasip3, with the headers wasi-l
 ## Large models
 
 `model.create` takes the GGUF as a `stream<u8>` plus its size, and reads it in order, so
-the file is never held in linear memory whole.
-Models over 4 GiB load, as long as the weights that stay on the CPU
+the file is never held in linear memory whole. GPU-bound tensors are uploaded through small
+staging buffers. Models over 4 GiB load, as long as the weights that stay on the CPU
 fit in wasm32's 4 GiB of linear memory. The llama.cpp changes this needs are in
 [`patches/`](patches), applied to the fetched checkout and listed above.
 

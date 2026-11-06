@@ -284,6 +284,11 @@ static bool model_create(
     // truncates to 0 in a 32-bit size_t, so every arch-marked tensor would log a
     // misleading "loaded into RAM in full" warning before being read normally.
     mp.lazy_mode = LLAMA_LAZY_MODE_OFF;
+    // ggml-webgpu exposes a host buffer type on wasi (patch 0009) so the loader
+    // can stage GPU uploads through small buffers. Without no_host, llama.cpp
+    // would also start placing CPU-resident weights in that buffer type; keep
+    // their placement exactly as it was.
+    mp.no_host = true;
     if (maybe_params) {
         mp.n_gpu_layers = maybe_params->n_gpu_layers;
     }
