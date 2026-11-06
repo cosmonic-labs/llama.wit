@@ -58,6 +58,11 @@ consumer builds the same source:
 | 0005 | model reads in 64 MiB chunks on WASI: a component-model stream read traps at 256 MiB |
 | 0006 | ggml-webgpu's buffer size limit is capped at `SIZE_MAX/2` on 32-bit targets, so weight buffers split below 4 GiB |
 | 0007 | ggml-webgpu lowercases the adapter vendor, so its dp4a path also turns on for "NVIDIA" from wgpu-native |
+| 0008 | the loader visits tensors in file order across every context, so a stream-backed `FILE *` only seeks forward; a tied output is copied from `token_embd` instead of read twice |
+| 0009 | ggml-webgpu on WASI advertises async uploads, events and a host buffer type, so GPU-bound tensors stream through small staging buffers instead of a host copy each |
+| 0010 | ggml-webgpu stages op params and uploads them once per submit batch, which grows from 64 to 256 |
+| 0011 | ggml-webgpu caches bind groups and their layouts instead of rebuilding them for every dispatch |
+| 0012 | ggml-webgpu flushes queued buffer writes while loading, so a model's weights aren't held twice |
 
 The patches apply to exactly that tag, so move them together. With
 `-DFETCHCONTENT_SOURCE_DIR_LLAMA=/path/...` the local checkout is used as it is, unpatched.
@@ -65,6 +70,16 @@ The patches apply to exactly that tag, so move them together. With
 [`cmake/wasip3.toolchain.cmake`](cmake/wasip3.toolchain.cmake) also builds llama.cpp's own
 tools (`llama-bench`, `llama-simple`) for wasm32-wasip3, with the headers wasi-libc lacks in
 `cmake/wasi-shims*`.
+
+## Large models
+
+`model.create` takes the GGUF as a `stream<u8>` plus its size, and reads it in order, so
+the file is never held in linear memory whole. GPU-bound tensors are uploaded through small
+staging buffers. Models over 4 GiB load, as long as the weights that stay on the CPU
+fit in wasm32's 4 GiB of linear memory. The llama.cpp changes this needs are in
+[`patches/`](patches), applied to the fetched checkout and listed above.
+
+Fetched dependencies are unpacked into `deps/` and shared by every build directory.
 
 ## Generate Bindings
 ```shell
@@ -101,7 +116,16 @@ Models are cached in `tests/guest-dir/models`.
 
 The live suite also downloads Qwen 0.5B, Llama 1B, and BGE small. It checks repeated
 GPU model swaps, larger-model prompt reuse, and embedding dimensions and similarity.
-CI compiles the guest and tests the runner's failure reporting; GPU tests run locally.
+
+```shell
+./tests/run.sh --large --filter large/qwen3-8b
+```
+
+The large suite streams models over 4 GiB, from Qwen3 8B up to Mistral Small 24B at Q8_0,
+and checks that what they generate is not degenerate. These models are not downloaded:
+put the GGUF named in [`models.rs`](tests/guest/src/models.rs) in `tests/guest-dir/models`,
+or the test skips. CI compiles the guest and tests the runner's failure reporting; GPU tests
+run locally.
 
 ## Releases
 
