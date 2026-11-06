@@ -1,0 +1,68 @@
+--- a/ggml/src/ggml-webgpu/ggml-webgpu.cpp
++++ b/ggml/src/ggml-webgpu/ggml-webgpu.cpp
+@@ -86,7 +86,7 @@
+ 
+ /* Constants */
+ 
+-#define WEBGPU_DEFAULT_COMMAND_SUBMIT_BATCH_SIZE 64u
++#define WEBGPU_DEFAULT_COMMAND_SUBMIT_BATCH_SIZE 256u
+ #define WEBGPU_NUM_PARAM_SLOT_SAFETY_MARGIN      10u
+ #define WEBGPU_RUNTIME_WAIT_TIMEOUT_MS           30000u
+ #define WEBGPU_RUNTIME_WAIT_TIMEOUT_NS           (WEBGPU_RUNTIME_WAIT_TIMEOUT_MS * 1e6)
+@@ -143,8 +143,29 @@
+         return slot_stride * next_slot++;
+     }
+ 
++    // Params are staged here and uploaded once per batch (see flush). Slots are
++    // handed out sequentially from 0 after each reset, so the used region is
++    // always contiguous and a single write covers it.
++    void stage(size_t offset, const void * data, size_t size) {
++        if (staging.size() < slot_stride * slot_count) {
++            staging.resize(slot_stride * slot_count);
++        }
++        memcpy(staging.data() + offset, data, size);
++    }
++
++    // Upload before the batch's commands are submitted: queue writes and submits
++    // are ordered on the queue, so the data is in place when the kernels run.
++    void flush(wgpu::Queue & queue) {
++        if (next_slot == 0) {
++            return;
++        }
++        queue.WriteBuffer(buffer, 0, staging.data(), slot_stride * next_slot);
++    }
++
+     void reset() { next_slot = 0; }
+ 
++    std::vector<uint8_t> staging;
++
+     void cleanup() {
+         if (buffer) {
+             buffer.Destroy();
+@@ -608,8 +629,8 @@
+     }
+ 
+     for (size_t i = 0; i < param_offsets.size(); i++) {
+-        ctx->global_ctx->queue.WriteBuffer(ctx->param_arena.buffer, param_offsets[i], dispatches[i].params.data(),
+-                                           dispatches[i].params.size() * sizeof(uint32_t));
++        ctx->param_arena.stage(param_offsets[i], dispatches[i].params.data(),
++                               dispatches[i].params.size() * sizeof(uint32_t));
+     }
+ 
+ #ifdef GGML_WEBGPU_GPU_PROFILE
+@@ -3477,6 +3498,7 @@
+             }
+             num_batched_kernels                = 0;
+             wgpu::CommandBuffer batch_commands = ctx->active_command_encoder.Finish();
++            ctx->param_arena.flush(ctx->global_ctx->queue);
+             ggml_backend_webgpu_submit_commands(ctx, batch_commands, num_inflight_batches);
+ 
+             // reset state for next batch
+@@ -3509,6 +3531,7 @@
+ 
+     if (num_batched_kernels > 0) {
+         wgpu::CommandBuffer batch_commands = ctx->active_command_encoder.Finish();
++        ctx->param_arena.flush(ctx->global_ctx->queue);
+         ggml_backend_webgpu_submit_commands(ctx, batch_commands, num_inflight_batches);
+         ctx->param_arena.reset();
+         commands.clear();

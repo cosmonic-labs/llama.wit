@@ -24,6 +24,7 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 
 # compile + link flags
+# llama.cpp uses mmap/clock/signal - each needs both the define below and the matching -l
 set(_wasi_flags "-mthread-model single -msimd128 -D_WASI_EMULATED_SIGNAL -D_WASI_EMULATED_MMAN -D_WASI_EMULATED_PROCESS_CLOCKS")
 set(CMAKE_C_FLAGS_INIT   "${_wasi_flags}")
 set(CMAKE_CXX_FLAGS_INIT "${_wasi_flags} -fwasm-exceptions")

@@ -25,6 +25,10 @@ struct RuntimeArgs {
     /// Include tests that download larger models.
     #[arg(long)]
     live: bool,
+    /// Include tests of models over 4 GiB. They skip unless their GGUF is in
+    /// tests/guest-dir/models.
+    #[arg(long)]
+    large: bool,
     /// Run tests whose names contain this text.
     #[arg(long)]
     filter: Option<String>,
@@ -129,6 +133,7 @@ impl WasiWebGpuCtxView for WorkloadState {
 async fn main() -> anyhow::Result<()> {
     env_logger::builder()
         .filter_level(log::LevelFilter::Info)
+        .parse_default_env()
         .init();
 
     let args = RuntimeArgs::parse();
@@ -162,6 +167,7 @@ async fn main() -> anyhow::Result<()> {
         .0
         .into_iter()
         .filter(|name| args.live || !name.starts_with("live/"))
+        .filter(|name| args.large || !name.starts_with("large/"))
         .filter(|name| {
             args.filter
                 .as_ref()

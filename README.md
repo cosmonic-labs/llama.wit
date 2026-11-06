@@ -44,6 +44,17 @@ fetched and pinned in [CMakeLists.txt](CMakeLists.txt) (`WASI_WEBGPU_HEADERS_TAG
 To build against a local checkout instead, use CMake's
 `-DFETCHCONTENT_SOURCE_DIR_WASI_WEBGPU_HEADERS=/path/...`.
 
+## Large models
+
+`model.create` takes the GGUF as a `stream<u8>` plus its size, and reads it in order, so
+the file is never held in linear memory whole. GPU-bound tensors are uploaded through small
+staging buffers. Models over 4 GiB load, as long as the weights that stay on the CPU
+fit in wasm32's 4 GiB of linear memory. The llama.cpp changes this needs are in
+[`patches/`](patches), applied to the fetched checkout and described in
+[CMakeLists.txt](CMakeLists.txt).
+
+Fetched dependencies are unpacked into `deps/` and shared by every build directory.
+
 ## Generate Bindings
 ```shell
 cmake --build build --target regenerate-bindings
@@ -79,7 +90,16 @@ Models are cached in `tests/guest-dir/models`.
 
 The live suite also downloads Qwen 0.5B, Llama 1B, and BGE small. It checks repeated
 GPU model swaps, larger-model prompt reuse, and embedding dimensions and similarity.
-CI compiles the guest and tests the runner's failure reporting; GPU tests run locally.
+
+```shell
+./tests/run.sh --large --filter large/qwen3-8b
+```
+
+The large suite streams models over 4 GiB, from Qwen3 8B up to Mistral Small 24B at Q8_0,
+and checks that what they generate is not degenerate. These models are not downloaded:
+put the GGUF named in [`models.rs`](tests/guest/src/models.rs) in `tests/guest-dir/models`,
+or the test skips. CI compiles the guest and tests the runner's failure reporting; GPU tests
+run locally.
 
 ## Releases
 

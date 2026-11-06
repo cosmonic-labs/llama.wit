@@ -1,0 +1,30 @@
+--- a/ggml/src/ggml-webgpu/ggml-webgpu.cpp
++++ b/ggml/src/ggml-webgpu/ggml-webgpu.cpp
+@@ -3901,7 +3901,26 @@
+ static size_t ggml_backend_webgpu_buffer_type_get_max_size(ggml_backend_buffer_type_t buft) {
+     ggml_backend_webgpu_device_context * dev_ctx =
+         static_cast<ggml_backend_webgpu_device_context *>(buft->device->context);
+-    return dev_ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize;
++    uint64_t max_size = dev_ctx->webgpu_global_ctx->capabilities.limits.maxStorageBufferBindingSize;
++#if SIZE_MAX < UINT64_MAX
++    // Where size_t is 32-bit (wasm32), an adapter limit at or above 4 GiB
++    // narrows to nearly SIZE_MAX, and that value is unusable as a split point.
++    // ggml_backend_alloc_ctx_tensors_from_buft_impl divides a context's tensors
++    // into buffers with `(cur_buf_size + this_size) > max_size`, every term a
++    // size_t: against a limit that large the sum wraps instead of ever
++    // exceeding it, so the split never fires and cur_buf_size ends up the true
++    // total mod 2^32. A 24B at Q8_0 asks for a 2.66 GiB buffer to hold 22.7 GiB
++    // of weights, then aborts in ggml_tallocr_alloc partway through filling it.
++    //
++    // Cap far enough below SIZE_MAX that the comparison stays exact with any
++    // single tensor added to it. Models much larger than the address space are
++    // the point of this build, so this path is the common one, not an edge case.
++    const uint64_t wasm32_max_size = 1ull << 30;  // 1 GiB
++    if (max_size > wasm32_max_size) {
++        max_size = wasm32_max_size;
++    }
++#endif
++    return static_cast<size_t>(max_size);
+ }
+ 
+ static size_t ggml_backend_webgpu_buffer_type_get_alloc_size(ggml_backend_buffer_type_t buft,

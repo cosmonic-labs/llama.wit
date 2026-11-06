@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
 project(llama-cpp-wit C CXX)
 
+# Fetched dependencies live in deps/ (gitignored) instead of inside each build
+# tree, so the build-* dirs share one checkout. Override with -DFETCHCONTENT_BASE_DIR.
+set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps CACHE PATH "Where fetched dependencies are unpacked")
+
 include(FetchContent)
 
 # https://releases.llvm.org/20.1.0/docs/ReleaseNotes.html#changes-to-the-webassembly-backend
@@ -50,10 +54,63 @@ set_target_properties(dawn::webgpu_dawn PROPERTIES
         "${dawn_SOURCE_DIR}/include/webgpu_upstream;${wasi_webgpu_headers_SOURCE_DIR}"
 )
 
+# Patches applied to the fetched llama.cpp tree, in order, so models larger
+# than linear memory, and over 4 GiB, load:
+# - 0002: visit tensors in file-offset order so a forward-only stream-backed
+#   FILE* never needs to seek backwards. A tied output, which shares token_embd's
+#   bytes, is copied from it rather than read twice.
+# - 0003: ggml-webgpu advertises async uploads + events + a host buffer type on
+#   wasi, so the loader stages GPU-bound tensors through 4 x 1 MiB buffers
+#   instead of a host copy of each whole tensor.
+# - 0004: file offsets and sizes as uint64_t instead of size_t (llama_file,
+#   llama_tensor_weight, gguf's data/tensor offset getters). size_t is 32-bit
+#   on wasm32, so without this any GGUF file over 4 GiB fails to load.
+# - 0005: ggml-webgpu caps the buffer-type max size on wasm32. The adapter's
+#   maxStorageBufferBindingSize narrows to nearly SIZE_MAX in a 32-bit size_t,
+#   which overflows the buffer-splitting arithmetic in ggml-alloc.c, so any
+#   model whose GPU-resident weights exceed 4 GiB aborts while laying out
+#   tensors. See the patch for the full accounting.
+# - 0006: ggml-webgpu stages op params on the CPU and uploads them once per
+#   submit batch instead of one queue.write-buffer per dispatch (~766 hostcalls
+#   per token on a 40-layer model), and raises that batch from 64 to 256.
+# - 0007: ggml-webgpu caches bind groups and bind group layouts, which were
+#   rebuilt for every dispatch (two more hostcalls per node). Invalidated when
+#   any buffer is freed.
+# - 0008: ggml-webgpu flushes queued writes during loading. queue.WriteBuffer
+#   stages its source until the next submit, and a model load submits nothing,
+#   so the weights are held twice and peak memory measures ~2.15x the model --
+#   enough to put a 13 GiB model over a 32 GiB machine.
+set(_patches
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0002-stream-ordered-tensor-loading.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0003-ggml-webgpu-async-uploads.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0004-64-bit-file-offsets.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0005-webgpu-wasm32-max-buffer-size.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0006-webgpu-batch-param-uploads.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0007-webgpu-cache-bind-groups.patch
+    ${CMAKE_CURRENT_SOURCE_DIR}/patches/0008-webgpu-flush-pending-writes.patch)
+# Idempotent: detection uses the same tool and fuzz as application. (A patch that
+# landed with fuzz is not reverse-detectable by strict `git apply`, and
+# `patch --forward` then exits 1 on "previously applied", failing populate.)
+# Each patch's hash rides along in the command: FetchContent re-runs the patch
+# step only when the command changes, so without it editing a patch file would
+# never reach an already-populated tree.
+# NOTE: no literal ';' in the command — CMake would split it into list items.
+set(_apply "true")
+foreach(_patch IN LISTS _patches)
+    file(SHA256 ${_patch} _patch_hash)
+    string(APPEND _apply " && (patch -p1 --reverse --dry-run --force --fuzz=3 < '${_patch}' >/dev/null 2>&1 || patch -p1 --forward --fuzz=3 < '${_patch}') && true ${_patch_hash}")
+endforeach()
+# ...and re-run configure itself when a patch file changes.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_patches})
+
+# llama is the one dependency we add_subdirectory, so its build tree must stay
+# per-build-dir; only the checkout is shared via deps/.
 FetchContent_Declare(llama
     GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
     GIT_TAG ${LLAMA_GIT_TAG}
     GIT_SHALLOW TRUE
+    BINARY_DIR ${CMAKE_BINARY_DIR}/llama-build
+    PATCH_COMMAND sh -c "${_apply}"
 )
 FetchContent_MakeAvailable(llama)
 
