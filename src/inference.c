@@ -676,22 +676,39 @@ static bool floats_dup(const float * src, size_t len, provider_list_f32_t * ret)
     return true;
 }
 
-bool exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith(
-        context_t * self, int32_t i, provider_list_f32_t * ret) {
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith(
+        context_t * self, int32_t i) {
+    provider_option_list_f32_t ret = {0};
     // llama.cpp only fills per-token embeddings without pooling
-    if (llama_pooling_type(self->ctx) != LLAMA_POOLING_TYPE_NONE) {
-        return false;
+    if (llama_pooling_type(self->ctx) == LLAMA_POOLING_TYPE_NONE) {
+        size_t n_embd = (size_t) llama_model_n_embd_out(self->model->model);
+        ret.is_some = floats_dup(llama_get_embeddings_ith(self->ctx, i), n_embd, &ret.val);
     }
-    size_t n_embd = (size_t) llama_model_n_embd_out(self->model->model);
-    return floats_dup(llama_get_embeddings_ith(self->ctx, i), n_embd, ret);
+    exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith_return(ret);
+    return PROVIDER_CALLBACK_CODE_EXIT;
 }
 
-bool exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq(
-        context_t * self, int32_t seq_id, provider_list_f32_t * ret) {
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith never returns yield/wait
+    abort();
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq(
+        context_t * self, int32_t seq_id) {
+    provider_option_list_f32_t ret = {0};
     size_t len = llama_pooling_type(self->ctx) == LLAMA_POOLING_TYPE_RANK
         ? (size_t) llama_model_n_cls_out(self->model->model)
         : (size_t) llama_model_n_embd_out(self->model->model);
-    return floats_dup(llama_get_embeddings_seq(self->ctx, seq_id), len, ret);
+    ret.is_some = floats_dup(llama_get_embeddings_seq(self->ctx, seq_id), len, &ret.val);
+    exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq_return(ret);
+    return PROVIDER_CALLBACK_CODE_EXIT;
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq never returns yield/wait
+    abort();
 }
 
 // --- sampler ---

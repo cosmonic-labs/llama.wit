@@ -165,13 +165,14 @@ interface api {
         /// `llama_get_embeddings_ith`: the embedding of the `i`th token of the
         /// last `decode`, `n-embd-out` long. Negative `i` counts from the end.
         /// `none` for an invalid `i`, a context without `embeddings`, or pooling
-        /// other than `none`.
-        get-embeddings-ith: func(i: s32) -> option<list<f32>>;
+        /// other than `none`. Async because llama.cpp synchronizes the backend
+        /// before it reads them.
+        get-embeddings-ith: async func(i: s32) -> option<list<f32>>;
 
         /// `llama_get_embeddings_seq`: the pooled embedding of `seq-id`,
         /// `n-embd-out` long, or `n-cls-out` long for `rank` pooling. `none` with
-        /// pooling `none`.
-        get-embeddings-seq: func(seq-id: s32) -> option<list<f32>>;
+        /// pooling `none`. Async like `get-embeddings-ith`.
+        get-embeddings-seq: async func(seq-id: s32) -> option<list<f32>>;
     }
 
     /// `llama_sampler`. Build a chain with `chain-init` and `chain-add`, as in

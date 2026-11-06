@@ -279,12 +279,13 @@ pub async fn embeddings() -> Result<(), String> {
     let tokens = model.tokenize("Once upon a time", true, true)?;
     let n = tokens.len() as i32;
     decode(&context, tokens).await?;
-    if context.get_embeddings_seq(0).is_some() {
+    if context.get_embeddings_seq(0).await.is_some() {
         return Err("pooled embedding without pooling".into());
     }
     for i in [0, n - 1, -1] {
         let vector = context
             .get_embeddings_ith(i)
+            .await
             .ok_or(format!("no embedding for token {i}"))?;
         if vector.len() != model.n_embd_out() as usize
             || !vector.iter().all(|x| x.is_finite())
@@ -293,7 +294,7 @@ pub async fn embeddings() -> Result<(), String> {
             return Err("invalid embedding vector".into());
         }
     }
-    if context.get_embeddings_ith(n).is_some() {
+    if context.get_embeddings_ith(n).await.is_some() {
         return Err("embedding past the last token".into());
     }
     Ok(())

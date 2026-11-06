@@ -128,47 +128,7 @@ void __wasm_export_exports_cosmonic_llama_cpp_api_method_model_description_post_
 
 
 
-__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api@0.8.0#[method]context.get-embeddings-ith")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith_post_return(uint8_t * arg0) {
-  switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
-    case 0: {
-      break;
-    }
-    case 1: {
-      size_t len = *((size_t*) (arg0 + (2*sizeof(void*))));
-      if (len > 0) {
-        uint8_t *ptr = *((uint8_t **) (arg0 + sizeof(void*)));
-        for (size_t i = 0; i < len; i++) {
-          uint8_t *base = ptr + i * 4;
-          (void) base;
-        }
-        free(ptr);
-      }
-      break;
-    }
-  }
-}
 
-__attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api@0.8.0#[method]context.get-embeddings-seq")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq_post_return(uint8_t * arg0) {
-  switch ((int32_t) (int32_t) *((uint8_t*) (arg0 + 0))) {
-    case 0: {
-      break;
-    }
-    case 1: {
-      size_t len = *((size_t*) (arg0 + (2*sizeof(void*))));
-      if (len > 0) {
-        uint8_t *ptr = *((uint8_t **) (arg0 + sizeof(void*)));
-        for (size_t i = 0; i < len; i++) {
-          uint8_t *base = ptr + i * 4;
-          (void) base;
-        }
-        free(ptr);
-      }
-      break;
-    }
-  }
-}
 
 
 __attribute__((__weak__, __export_name__("cabi_post_cosmonic:llama-cpp/api@0.8.0#[method]sampler.chain-add")))
@@ -577,6 +537,68 @@ void exports_cosmonic_llama_cpp_api_method_context_decode_return(exports_cosmoni
   }
 
   __wasm_export_exports_cosmonic_llama_cpp_api_method_context_decode__task_return(result, result4);
+}
+
+
+__attribute__((__export_name__("[callback][async-lift]cosmonic:llama-cpp/api@0.8.0#[method]context.get-embeddings-ith")))
+uint32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith_callback(uint32_t event_raw, uint32_t waitable, uint32_t code) {
+  provider_event_t event;
+  event.event = (provider_event_code_t) event_raw;
+  event.waitable = waitable;
+  event.code = code;
+  return exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith_callback(&event);
+}
+
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[task-return][method]context.get-embeddings-ith")))
+void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith__task_return(int32_t, uint8_t *, size_t);
+
+void exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith_return(provider_option_list_f32_t ret) {
+  int32_t option;
+  uint8_t * option2;
+  size_t option3;
+  if ((ret).is_some) {
+    const provider_list_f32_t *payload1 = &(ret).val;
+    option = 1;
+    option2 = (uint8_t *) (*payload1).ptr;
+    option3 = (*payload1).len;
+  } else {
+    option = 0;
+    option2 = 0;
+    option3 = 0;
+  }
+
+  __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith__task_return(option, option2, option3);
+}
+
+
+__attribute__((__export_name__("[callback][async-lift]cosmonic:llama-cpp/api@0.8.0#[method]context.get-embeddings-seq")))
+uint32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq_callback(uint32_t event_raw, uint32_t waitable, uint32_t code) {
+  provider_event_t event;
+  event.event = (provider_event_code_t) event_raw;
+  event.waitable = waitable;
+  event.code = code;
+  return exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq_callback(&event);
+}
+
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[task-return][method]context.get-embeddings-seq")))
+void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq__task_return(int32_t, uint8_t *, size_t);
+
+void exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq_return(provider_option_list_f32_t ret) {
+  int32_t option;
+  uint8_t * option2;
+  size_t option3;
+  if ((ret).is_some) {
+    const provider_list_f32_t *payload1 = &(ret).val;
+    option = 1;
+    option2 = (uint8_t *) (*payload1).ptr;
+    option3 = (*payload1).len;
+  } else {
+    option = 0;
+    option2 = 0;
+    option3 = 0;
+  }
+
+  __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq__task_return(option, option2, option3);
 }
 
 
@@ -1011,44 +1033,16 @@ int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_memory_seq_p
   return ret;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api@0.8.0#[method]context.get-embeddings-ith")))
-uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith(uint8_t * arg, int32_t arg0) {
-  provider_list_f32_t val;
-  bool ret = exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith(((exports_cosmonic_llama_cpp_api_context_t*) arg), arg0, &val);
-
-  provider_option_list_f32_t ret1;
-  ret1.is_some = ret;
-  ret1.val = val;
-  uint8_t *ptr = (uint8_t *) &RET_AREA;
-  if ((ret1).is_some) {
-    const provider_list_f32_t *payload2 = &(ret1).val;
-    *((int8_t*)(ptr + 0)) = 1;
-    *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload2).len;
-    *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload2).ptr;
-  } else {
-    *((int8_t*)(ptr + 0)) = 0;
-  }
-  return ptr;
+__attribute__((__export_name__("[async-lift]cosmonic:llama-cpp/api@0.8.0#[method]context.get-embeddings-ith")))
+int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith(uint8_t * arg, int32_t arg0) {
+  provider_callback_code_t ret = exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith(((exports_cosmonic_llama_cpp_api_context_t*) arg), arg0);
+  return ret;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api@0.8.0#[method]context.get-embeddings-seq")))
-uint8_t * __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq(uint8_t * arg, int32_t arg0) {
-  provider_list_f32_t val;
-  bool ret = exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq(((exports_cosmonic_llama_cpp_api_context_t*) arg), arg0, &val);
-
-  provider_option_list_f32_t ret1;
-  ret1.is_some = ret;
-  ret1.val = val;
-  uint8_t *ptr = (uint8_t *) &RET_AREA;
-  if ((ret1).is_some) {
-    const provider_list_f32_t *payload2 = &(ret1).val;
-    *((int8_t*)(ptr + 0)) = 1;
-    *((size_t*)(ptr + (2*sizeof(void*)))) = (*payload2).len;
-    *((uint8_t **)(ptr + sizeof(void*))) = (uint8_t *) (*payload2).ptr;
-  } else {
-    *((int8_t*)(ptr + 0)) = 0;
-  }
-  return ptr;
+__attribute__((__export_name__("[async-lift]cosmonic:llama-cpp/api@0.8.0#[method]context.get-embeddings-seq")))
+int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq(uint8_t * arg, int32_t arg0) {
+  provider_callback_code_t ret = exports_cosmonic_llama_cpp_api_method_context_get_embeddings_seq(((exports_cosmonic_llama_cpp_api_context_t*) arg), arg0);
+  return ret;
 }
 
 __attribute__((__export_name__("cosmonic:llama-cpp/api@0.8.0#[static]sampler.chain-init")))
