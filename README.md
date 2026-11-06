@@ -67,6 +67,14 @@ The patches apply to exactly that tag, so move them together. With
 tools (`llama-bench`, `llama-simple`) for wasm32-wasip3, with the headers wasi-libc lacks in
 `cmake/wasi-shims*`.
 
+## Large models
+
+`model.create` takes the GGUF as a `stream<u8>` plus its size, and reads it in order, so
+the file is never held in linear memory whole.
+Models over 4 GiB load, as long as the weights that stay on the CPU
+fit in wasm32's 4 GiB of linear memory. The llama.cpp changes this needs are in
+[`patches/`](patches), applied to the fetched checkout and listed above.
+
 Fetched dependencies are unpacked into `deps/` and shared by every build directory.
 
 ## Generate Bindings

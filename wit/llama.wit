@@ -1,8 +1,8 @@
-package cosmonic:llama-cpp@0.7.0;
+package cosmonic:llama-cpp@0.8.0;
 
 /// llama.cpp's public API, `llama.h`, as WIT. Each function names the `llama.h`
 /// function it wraps. They differ only where WIT needs it: resources instead of
-/// pointers, `result`/`option` instead of NULL and error codes, `list<u8>` for
+/// pointers, `result`/`option` instead of NULL and error codes, `stream<u8>` for
 /// files, and checks that turn llama.cpp's asserts into errors.
 ///
 /// `model` is `llama_model` and its `llama_vocab`, `context` is `llama_context`,
@@ -61,9 +61,12 @@ interface api {
     /// A loaded model and its vocabulary. Any number of contexts can be created
     /// from one model.
     resource model {
-        /// `llama_model_load_from_file_ptr`, over the bytes of a GGUF file so
-        /// the provider does no filesystem I/O.
-        create: static async func(data: list<u8>, params: option<model-params>) -> result<model, string>;
+        /// `llama_model_load_from_file_ptr`, over a stream of the bytes of a
+        /// GGUF file so the provider does no filesystem I/O. The file is read
+        /// in order and never held in memory whole, so models larger than
+        /// linear memory load. `size` is the file's length in bytes, which a
+        /// stream does not carry.
+        create: static async func(data: stream<u8>, size: u64, params: option<model-params>) -> result<model, string>;
 
         /// `llama_tokenize`. `add-special` adds the model's start tokens (such
         /// as BOS); `parse-special` turns special-token text into those tokens.

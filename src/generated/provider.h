@@ -163,10 +163,7 @@ typedef struct {
   } val;
 } exports_cosmonic_llama_cpp_api_result_string_string_t;
 
-typedef struct {
-  uint8_t *ptr;
-  size_t len;
-} provider_list_u8_t;
+typedef uint32_t exports_cosmonic_llama_cpp_api_stream_u8_t;
 
 typedef struct {
   bool is_some;
@@ -193,6 +190,11 @@ typedef struct {
     provider_string_t err;
   } val;
 } exports_cosmonic_llama_cpp_api_result_list_u32_string_t;
+
+typedef struct {
+  uint8_t *ptr;
+  size_t len;
+} provider_list_u8_t;
 
 typedef struct {
   bool is_err;
@@ -265,9 +267,9 @@ typedef struct {
   } val;
 } exports_cosmonic_llama_cpp_api_result_u32_string_t;
 
-// Exported Functions from `cosmonic:llama-cpp/api@0.7.0`
+// Exported Functions from `cosmonic:llama-cpp/api@0.8.0`
 bool exports_cosmonic_llama_cpp_api_chat_apply_template(provider_string_t *tmpl, exports_cosmonic_llama_cpp_api_list_chat_message_t *chat, bool add_ass, provider_string_t *ret, provider_string_t *err);
-provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(provider_list_u8_t *data, exports_cosmonic_llama_cpp_api_model_params_t *maybe_params);
+provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(exports_cosmonic_llama_cpp_api_stream_u8_t data, uint64_t size, exports_cosmonic_llama_cpp_api_model_params_t *maybe_params);
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create_callback(provider_event_t *event);
 bool exports_cosmonic_llama_cpp_api_method_model_tokenize(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_string_t *text, bool add_special, bool parse_special, provider_list_u32_t *ret, provider_string_t *err);
 bool exports_cosmonic_llama_cpp_api_method_model_detokenize(exports_cosmonic_llama_cpp_api_borrow_model_t self, provider_list_u32_t *tokens, bool remove_special, bool unparse_special, provider_string_t *ret, provider_string_t *err);
@@ -334,8 +336,6 @@ void exports_cosmonic_llama_cpp_api_list_chat_message_free(exports_cosmonic_llam
 
 void exports_cosmonic_llama_cpp_api_result_string_string_free(exports_cosmonic_llama_cpp_api_result_string_string_t *ptr);
 
-void provider_list_u8_free(provider_list_u8_t *ptr);
-
 void exports_cosmonic_llama_cpp_api_option_model_params_free(exports_cosmonic_llama_cpp_api_option_model_params_t *ptr);
 
 void exports_cosmonic_llama_cpp_api_result_own_model_string_free(exports_cosmonic_llama_cpp_api_result_own_model_string_t *ptr);
@@ -343,6 +343,8 @@ void exports_cosmonic_llama_cpp_api_result_own_model_string_free(exports_cosmoni
 void provider_list_u32_free(provider_list_u32_t *ptr);
 
 void exports_cosmonic_llama_cpp_api_result_list_u32_string_free(exports_cosmonic_llama_cpp_api_result_list_u32_string_t *ptr);
+
+void provider_list_u8_free(provider_list_u8_t *ptr);
 
 void exports_cosmonic_llama_cpp_api_result_list_u8_string_free(exports_cosmonic_llama_cpp_api_result_list_u8_string_t *ptr);
 
@@ -366,6 +368,17 @@ void exports_cosmonic_llama_cpp_api_result_own_sampler_string_free(exports_cosmo
 
 void exports_cosmonic_llama_cpp_api_result_u32_string_free(exports_cosmonic_llama_cpp_api_result_u32_string_t *ptr);
 void exports_cosmonic_llama_cpp_api_static_model_create_return(exports_cosmonic_llama_cpp_api_result_own_model_string_t ret);
+
+typedef uint32_t exports_cosmonic_llama_cpp_api_stream_u8_writer_t;
+
+exports_cosmonic_llama_cpp_api_stream_u8_t exports_cosmonic_llama_cpp_api_stream_u8_new(exports_cosmonic_llama_cpp_api_stream_u8_writer_t *writer);
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_stream_u8_read(exports_cosmonic_llama_cpp_api_stream_u8_t reader, uint8_t *buf, size_t amt);
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_stream_u8_write(exports_cosmonic_llama_cpp_api_stream_u8_writer_t writer, const uint8_t *buf, size_t amt);
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_stream_u8_cancel_read(exports_cosmonic_llama_cpp_api_stream_u8_t reader);
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_stream_u8_cancel_write(exports_cosmonic_llama_cpp_api_stream_u8_writer_t writer);
+void exports_cosmonic_llama_cpp_api_stream_u8_drop_readable(exports_cosmonic_llama_cpp_api_stream_u8_t reader);
+void exports_cosmonic_llama_cpp_api_stream_u8_drop_writable(exports_cosmonic_llama_cpp_api_stream_u8_writer_t writer);
+
 void exports_cosmonic_llama_cpp_api_static_context_create_return(exports_cosmonic_llama_cpp_api_result_own_context_string_t ret);
 void exports_cosmonic_llama_cpp_api_method_context_decode_return(exports_cosmonic_llama_cpp_api_result_void_s32_t ret);
 void exports_cosmonic_llama_cpp_api_method_sampler_sample_return(exports_cosmonic_llama_cpp_api_result_u32_string_t ret);

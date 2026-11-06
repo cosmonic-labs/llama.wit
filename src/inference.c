@@ -1,8 +1,10 @@
 // cosmonic:llama-cpp/api (wit/llama.wit) over llama.cpp's C API
 // Exports own their arguments, so each one frees what it is handed (borrows aside)
+#define _GNU_SOURCE  // fopencookie
 #include "provider.h"
 #include "llama.h"
 
+#include <errno.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -120,8 +122,148 @@ static void log_cb(enum ggml_log_level level, const char * text, void * user) {
 
 // --- model ---
 
+// model.create receives the GGUF as a wasip3 stream so the full file never has
+// to sit in linear memory (wasm memory can only grow, so a one-shot list<u8>
+// would raise the memory floor by the model size forever). llama.cpp wants a
+// seekable FILE*, so wrap the stream in a fopencookie shim: seeks are virtual
+// (they just move a position), and reads pull from the stream, skipping forward
+// over any gap. The stream is forward-only; patch 0008 makes the loader visit
+// tensors in file-offset order so a backward read never happens (if one does,
+// it fails the load with ESPIPE rather than delivering wrong bytes).
+// The FILE* itself is unbuffered (stdio read-ahead would break the position
+// accounting), so the cookie carries its own read-ahead cache: GGUF metadata is
+// parsed in very small freads (per key, per vocab token), and without batching
+// each one would be a cross-boundary stream.read call. The cache also lets small
+// backward seeks (within the cached window) succeed.
+#define STREAM_COOKIE_BUF_CAP (256u * 1024)
+typedef struct {
+    exports_cosmonic_llama_cpp_api_stream_u8_t reader;
+    provider_waitable_set_t wait_set;  // reader joined for the load's duration
+    uint64_t size;       // total file size, for SEEK_END (streams carry no length)
+    uint64_t pos;        // virtual position: where the next read expects data
+    uint64_t consumed;   // bytes actually pulled off the stream so far
+    bool     dropped;    // writer closed the stream
+    uint64_t buf_start;  // file offset of buf[0]
+    size_t   buf_len;    // valid bytes in buf (buf_start + buf_len == consumed)
+    uint8_t  buf[STREAM_COOKIE_BUF_CAP];  // read-ahead cache
+} stream_cookie_t;
+
+// The Canonical ABI limits one stream read or write to Buffer.MAX_LENGTH items
+// (CanonicalABI.md: `class Buffer: MAX_LENGTH = 2**28 - 1`). The cap exists
+// because a stream event packs a 4-bit result with the progress count into one
+// 32-bit value (`packed_result = result | (progress << 4)`), so a count has to
+// fit in 28 bits. For stream<u8> an item is a byte. A host that enforces it
+// traps rather than reading less: wasmtime raises Trap::StreamOpTooBig from
+// ItemCount::new (component/concurrent/futures_and_streams.rs).
+//
+// The loader asks for a whole tensor at a time for any CPU-resident weight, so
+// without a clamp one read can be far over the limit (token_embd is ~680 MB on
+// a 24B at Q8_0 when it is not moved to the GPU). Clamping costs nothing:
+// cookie_read already loops until the request is satisfied, since a stream read
+// may return short for its own reasons.
+#define STREAM_MAX_READ ((1u << 28) - 1u)  // Buffer.MAX_LENGTH, the largest legal read
+
+// One pull of up to `amt` bytes, blocking on the waitable set if the stream has
+// nothing ready. Returns the byte count (0 = stream ended).
+static size_t stream_pull(stream_cookie_t * c, uint8_t * buf, size_t amt) {
+    if (c->dropped) {
+        return 0;
+    }
+    if (amt > STREAM_MAX_READ) {
+        amt = STREAM_MAX_READ;
+    }
+    provider_waitable_status_t st =
+        exports_cosmonic_llama_cpp_api_stream_u8_read(c->reader, buf, amt);
+    if (st == PROVIDER_WAITABLE_STATUS_BLOCKED) {
+        provider_event_t ev;
+        do {
+            provider_waitable_set_wait(c->wait_set, &ev);
+        } while (ev.event != PROVIDER_EVENT_STREAM_READ || ev.waitable != c->reader);
+        st = (provider_waitable_status_t) ev.code;
+    }
+    if (PROVIDER_WAITABLE_STATE(st) != PROVIDER_WAITABLE_COMPLETED) {
+        c->dropped = true;
+    }
+    return PROVIDER_WAITABLE_COUNT(st);
+}
+
+// Fills the request completely when it can: stdio treats a short read as
+// end-of-file, so anything less than `len` must mean the stream really ended.
+static ssize_t cookie_read(void * vc, char * dst, size_t len) {
+    stream_cookie_t * c = (stream_cookie_t *) vc;
+    size_t got = 0;
+    while (got < len) {
+        // Serve from the read-ahead cache when the position lands inside it.
+        if (c->pos >= c->buf_start && c->pos < c->buf_start + c->buf_len) {
+            size_t at = (size_t) (c->pos - c->buf_start);
+            size_t n = c->buf_len - at;
+            if (n > len - got) {
+                n = len - got;
+            }
+            memcpy(dst + got, c->buf + at, n);
+            got += n;
+            c->pos += n;
+            continue;
+        }
+        if (c->pos < c->buf_start) {
+            errno = ESPIPE;  // rewind past the cache: impossible on a stream
+            return -1;
+        }
+        // Skip forward over the gap between the stream head and the position
+        // (alignment padding, tensors the model doesn't use, ...). Reuse the
+        // cache as scratch — it holds nothing useful from before the gap.
+        while (c->pos > c->consumed) {
+            uint64_t gap = c->pos - c->consumed;
+            size_t n = stream_pull(c, c->buf, gap < sizeof c->buf ? (size_t) gap : sizeof c->buf);
+            if (n == 0) {
+                return (ssize_t) got;  // stream ended inside the gap -> EOF
+            }
+            c->consumed += n;
+        }
+        c->buf_start = c->consumed;
+        c->buf_len = 0;
+        if (len - got >= sizeof c->buf) {
+            // Large read (tensor data): pull straight into the caller's buffer.
+            size_t n = stream_pull(c, (uint8_t *) dst + got, len - got);
+            if (n == 0) {
+                break;
+            }
+            got += n;
+            c->pos += n;
+            c->consumed += n;
+            c->buf_start = c->consumed;
+        } else {
+            // Small read (metadata): refill the cache in one big pull.
+            size_t n = stream_pull(c, c->buf, sizeof c->buf);
+            if (n == 0) {
+                break;
+            }
+            c->buf_len = n;
+            c->consumed += n;
+            // next iteration serves from the cache
+        }
+    }
+    return (ssize_t) got;
+}
+
+static int cookie_seek(void * vc, off_t * off, int whence) {
+    stream_cookie_t * c = (stream_cookie_t *) vc;
+    int64_t base = whence == SEEK_SET ? 0
+                 : whence == SEEK_CUR ? (int64_t) c->pos
+                                      : (int64_t) c->size;
+    int64_t target = base + (int64_t) *off;
+    if (target < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    c->pos = (uint64_t) target;  // virtual: nothing is consumed until a read
+    *off = (off_t) target;
+    return 0;
+}
+
 static bool model_create(
-        provider_list_u8_t * data,
+        exports_cosmonic_llama_cpp_api_stream_u8_t data,
+        uint64_t size,
         exports_cosmonic_llama_cpp_api_model_params_t * maybe_params,
         exports_cosmonic_llama_cpp_api_own_model_t * ret,
         provider_string_t * err) {
@@ -133,22 +275,49 @@ static bool model_create(
     }
 
     struct llama_model_params mp = llama_model_default_params();
+    // Never mmap: on WASI it would be wasi-libc's emulation, which reads the whole
+    // file into memory — exactly what streaming exists to avoid. Belt and braces:
+    // llama_mmap::SUPPORTED is already false here (wasi-libc does not define
+    // _POSIX_MAPPED_FILES), so the loader force-disables mmap anyway.
+    mp.load_mode = LLAMA_LOAD_MODE_NONE;
+    // Lazy reads need mmap too. With AUTO, llama.cpp's 4 GiB lazy threshold
+    // truncates to 0 in a 32-bit size_t, so every arch-marked tensor would log a
+    // misleading "loaded into RAM in full" warning before being read normally.
+    mp.lazy_mode = LLAMA_LAZY_MODE_OFF;
     if (maybe_params) {
         mp.n_gpu_layers = maybe_params->n_gpu_layers;
     }
-    // fmemopen avoids wasip3's async wasi:filesystem
-    FILE * f = fmemopen(data->ptr, data->len, "rb");
+
+    stream_cookie_t cookie = {
+        .reader   = data,
+        .wait_set = provider_waitable_set_new(),
+        .size     = size,
+    };
+    provider_waitable_join(data, cookie.wait_set);
+
+    cookie_io_functions_t io = { .read = cookie_read, .seek = cookie_seek };
+    FILE * f = fopencookie(&cookie, "rb", io);
+    bool ok = false;
+    struct llama_model * m = NULL;
     if (!f) {
-        set_err(err, "fmemopen failed");
-        return false;
+        set_err(err, "fopencookie failed");
+    } else {
+        // Unbuffered: stdio read-ahead would consume stream bytes past what the
+        // loader asked for, making the next forward seek look like a rewind.
+        setvbuf(f, NULL, _IONBF, 0);
+        m = llama_model_load_from_file_ptr(f, mp);
+        fclose(f);
+        if (!m) {
+            set_err(err, "failed to load model");
+        }
     }
-    // Loading copies the tensors out, so the GGUF bytes can go once the file is closed
-    struct llama_model * m = llama_model_load_from_file_ptr(f, mp);
-    fclose(f);
+    provider_waitable_join(data, 0);  // leave the set before dropping it
+    provider_waitable_set_drop(cookie.wait_set);
+    exports_cosmonic_llama_cpp_api_stream_u8_drop_readable(data);
     if (!m) {
-        set_err(err, "failed to load model");
-        return false;
+        return ok;
     }
+
     model_t * rep = (model_t *) malloc(sizeof(model_t));
     rep->model = m;
     rep->vocab = llama_model_get_vocab(m);
@@ -158,11 +327,11 @@ static bool model_create(
 }
 
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(
-        provider_list_u8_t * data,
+        exports_cosmonic_llama_cpp_api_stream_u8_t data,
+        uint64_t size,
         exports_cosmonic_llama_cpp_api_model_params_t * maybe_params) {
     exports_cosmonic_llama_cpp_api_result_own_model_string_t ret;
-    ret.is_err = !model_create(data, maybe_params, &ret.val.ok, &ret.val.err);
-    provider_list_u8_free(data);
+    ret.is_err = !model_create(data, size, maybe_params, &ret.val.ok, &ret.val.err);
     exports_cosmonic_llama_cpp_api_static_model_create_return(ret);
     return PROVIDER_CALLBACK_CODE_EXIT;
 }

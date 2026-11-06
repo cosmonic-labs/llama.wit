@@ -7,14 +7,16 @@ const PROMPT: &str = "Once upon a time";
 const N_GPU_LAYERS: i32 = 99;
 
 pub async fn run() -> Result<(), String> {
-    let bytes = models::load(&models::STORIES_260K)?;
+    let (data, size, errors) = models::stream(&models::STORIES_260K)?;
     let model = Model::create(
-        bytes,
+        data,
+        size,
         Some(ModelParams {
             n_gpu_layers: N_GPU_LAYERS,
         }),
     )
-    .await?;
+    .await
+    .map_err(|e| errors.explain(e))?;
 
     let context = Context::create(&model, None).await?;
     let prompt = model.tokenize(PROMPT, true, true)?;

@@ -1,13 +1,27 @@
 //! Hugging Face models, cached in the preopened directory so they download once.
+//!
+//! Models are never read into memory: GGUF files run to tens of gigabytes,
+//! far past what a wasm32 guest can address. `stream` hands the provider a
+//! `stream<u8>` fed chunk-by-chunk off the file instead.
 
+use std::cell::RefCell;
 use std::error::Error;
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
+use wit_bindgen::StreamReader;
 use wstd::http::{Body, BodyExt, Client, Method, Request, Uri};
 
+use crate::wit_stream;
+
 const CACHE_DIR: &str = "/models";
+
+/// How much of the file to hand the provider per write. Bounded so that
+/// neither side has to hold the whole model, and well under the Canonical
+/// ABI's per-read cap of `2**28 - 1` items.
+const CHUNK: usize = 4 << 20; // 4 MiB
 
 pub struct HfModel {
     url: &'static str,
@@ -35,19 +49,88 @@ pub const BGE: HfModel = HfModel {
     file: "bge-small-en-v1.5-q8_0.gguf",
 };
 
-pub fn load(model: &HfModel) -> Result<Vec<u8>, String> {
-    download(model).map_err(|e| format!("{}: {e}", model.file))
+impl HfModel {
+    fn path(&self) -> PathBuf {
+        PathBuf::from(CACHE_DIR).join(self.file)
+    }
 }
 
-fn download(model: &HfModel) -> Result<Vec<u8>, Box<dyn Error>> {
-    let path = PathBuf::from(CACHE_DIR).join(model.file);
-    if !path.exists() {
-        fs::create_dir_all(CACHE_DIR)?;
-        let partial = path.with_extension("part");
-        wstd::runtime::block_on(fetch(model.url, &partial))?;
-        fs::rename(&partial, &path)?;
+/// Feed `model` into a `stream<u8>` for `Model::create`, along with its total
+/// size (the loader needs the length up front; streams don't carry one).
+///
+/// The writer runs as its own task because the provider pulls bytes off the
+/// stream *during* `create` — writing inline would deadlock against it.
+pub fn stream(model: &HfModel) -> Result<(StreamReader<u8>, u64, ReadErrors), String> {
+    let path = ensure(model)?;
+    let open = || -> Result<(File, u64), std::io::Error> {
+        let file = File::open(&path)?;
+        let size = file.metadata()?.len();
+        Ok((file, size))
+    };
+    let (mut file, size) = open().map_err(|e| format!("{}: {e}", model.file))?;
+
+    let (mut tx, rx) = wit_stream::new::<u8>();
+    let errors = ReadErrors::default();
+    let sink = errors.clone();
+    wit_bindgen::spawn_local(async move {
+        let mut buf = vec![0u8; CHUNK];
+        loop {
+            let n = match file.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) => {
+                    // Nothing to return to here: drop the writer, which ends
+                    // the stream short and fails `create`. `explain` pairs
+                    // that failure back up with this error.
+                    sink.set(format!("read failed: {e}"));
+                    break;
+                }
+            };
+            if !tx.write_all(buf[..n].to_vec()).await.is_empty() {
+                break; // provider hung up, it reports its own error
+            }
+        }
+    });
+
+    Ok((rx, size, errors))
+}
+
+/// Carries a streaming failure out of the writer task, which has no way to
+/// report one itself.
+#[derive(Default, Clone)]
+pub struct ReadErrors(Rc<RefCell<Option<String>>>);
+
+impl ReadErrors {
+    fn set(&self, error: String) {
+        *self.0.borrow_mut() = Some(error);
     }
-    Ok(fs::read(&path)?)
+
+    /// Fold a stream-side failure into a `create` error, so a bad disk read
+    /// doesn't surface as an unexplained truncated-model error.
+    pub fn explain(&self, error: String) -> String {
+        match self.0.borrow().as_ref() {
+            Some(cause) => format!("{error} (streaming the file failed: {cause})"),
+            None => error,
+        }
+    }
+}
+
+/// Path to the model's file, downloading it first if it isn't cached yet.
+fn ensure(model: &HfModel) -> Result<PathBuf, String> {
+    let path = model.path();
+    if path.exists() {
+        return Ok(path);
+    }
+    download(model.url, &path).map_err(|e| format!("{}: {e}", model.file))?;
+    Ok(path)
+}
+
+fn download(url: &str, path: &Path) -> Result<(), Box<dyn Error>> {
+    fs::create_dir_all(CACHE_DIR)?;
+    let partial = path.with_extension("part");
+    wstd::runtime::block_on(fetch(url, &partial))?;
+    fs::rename(&partial, path)?;
+    Ok(())
 }
 
 async fn fetch(url: &str, dest: &Path) -> Result<(), Box<dyn Error>> {
