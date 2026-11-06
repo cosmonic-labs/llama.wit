@@ -44,6 +44,28 @@ fetched and pinned in [CMakeLists.txt](CMakeLists.txt) (`WASI_WEBGPU_HEADERS_TAG
 To build against a local checkout instead, use CMake's
 `-DFETCHCONTENT_SOURCE_DIR_WASI_WEBGPU_HEADERS=/path/...`.
 
+## llama.cpp patches
+
+The build fetches llama.cpp at `LLAMA_GIT_TAG` and applies [`patches/`](patches) in order.
+They are what llama.cpp needs to run as a wasm32 component, and are kept here so every
+consumer builds the same source:
+
+| patch | what it does |
+|---|---|
+| 0001 | `GGML_WEBGPU_PORTABLE` keeps a native ggml-webgpu build off Dawn-only features, so it runs the same shaders as the wasm build |
+| 0002, 0003 | llama.cpp's common library builds on WASI: no process priority, no file locks |
+| 0004 | 64-bit GGUF file offsets on WASI, so a model past 4 GiB loads in a wasm32 guest |
+| 0005 | model reads in 64 MiB chunks on WASI: a component-model stream read traps at 256 MiB |
+| 0006 | ggml-webgpu's buffer size limit is capped at `SIZE_MAX/2` on 32-bit targets, so weight buffers split below 4 GiB |
+| 0007 | ggml-webgpu lowercases the adapter vendor, so its dp4a path also turns on for "NVIDIA" from wgpu-native |
+
+The patches apply to exactly that tag, so move them together. With
+`-DFETCHCONTENT_SOURCE_DIR_LLAMA=/path/...` the local checkout is used as it is, unpatched.
+
+[`cmake/wasip3.toolchain.cmake`](cmake/wasip3.toolchain.cmake) also builds llama.cpp's own
+tools (`llama-bench`, `llama-simple`) for wasm32-wasip3, with the headers wasi-libc lacks in
+`cmake/wasi-shims*`.
+
 ## Generate Bindings
 ```shell
 cmake --build build --target regenerate-bindings

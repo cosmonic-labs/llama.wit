@@ -3,11 +3,8 @@ project(llama-cpp-wit C CXX)
 
 include(FetchContent)
 
-# https://releases.llvm.org/20.1.0/docs/ReleaseNotes.html#changes-to-the-webassembly-backend
-# > this option is turned on by default for the moment
-add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-mllvm;-wasm-use-legacy-eh=false>")
-
-set(LLAMA_GIT_TAG b11514 CACHE STRING "llama.cpp release tag to build")
+# patches/ applies to exactly this tag: move them together.
+set(LLAMA_GIT_TAG b12135 CACHE STRING "llama.cpp release tag to build")
 option(LLAMA_WIT_JSON_SCHEMA "Build the provider-with-json-schema world, which also exports llama.cpp's JSON Schema to GBNF converter" OFF)
 
 # Trim llama.cpp to just the static libs we link.
@@ -50,10 +47,15 @@ set_target_properties(dawn::webgpu_dawn PROPERTIES
         "${dawn_SOURCE_DIR}/include/webgpu_upstream;${wasi_webgpu_headers_SOURCE_DIR}"
 )
 
+file(GLOB LLAMA_PATCHES ${CMAKE_CURRENT_SOURCE_DIR}/patches/*.patch)
+list(SORT LLAMA_PATCHES)
+# Resets the checkout first, so a rerun applies the series to a clean tree.
 FetchContent_Declare(llama
     GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
     GIT_TAG ${LLAMA_GIT_TAG}
     GIT_SHALLOW TRUE
+    PATCH_COMMAND git checkout -q -- .
+          COMMAND git apply ${LLAMA_PATCHES}
 )
 FetchContent_MakeAvailable(llama)
 
