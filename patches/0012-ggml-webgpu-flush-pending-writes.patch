@@ -1,0 +1,65 @@
+--- a/ggml/src/ggml-webgpu/ggml-webgpu.cpp
++++ b/ggml/src/ggml-webgpu/ggml-webgpu.cpp
+@@ -240,6 +240,10 @@
+ 
+     std::string vendor;
+ 
++    // Bytes handed to queue.WriteBuffer since the last submit. See
++    // ggml_webgpu_flush_writes.
++    uint64_t bytes_since_submit = 0;
++
+     // TODO: We should rework the CPU profiling time handling to make it more useful. ref: https://github.com/ggml-org/llama.cpp/pull/22050
+ #ifdef GGML_WEBGPU_CPU_PROFILE
+     // Profiling: labeled CPU time in ms (total)
+@@ -3723,6 +3727,35 @@
+     ggml_backend_webgpu_device_event_synchronize(nullptr, event);
+ }
+ 
++// queue.WriteBuffer does not touch the destination buffer: it copies the source
++// into the queue's pending writes, which only reach the buffer at the next
++// submit. Loading a model issues no submits at all -- nothing is computed until
++// the weights are up -- so every byte is held twice, once in its destination
++// buffer and once in staging, and peak memory measures ~2.15x the model. That
++// is what puts a 13 GiB model over a 32 GiB machine while a 10 GiB one fits.
++//
++// Submitting an empty command buffer flushes the pending writes and releases
++// the staging memory. Do it every so many bytes so staging stays bounded and
++// peak tracks the model rather than twice the model. The threshold only has to
++// be small against the memory it saves and large against a submit's cost; a
++// 13 GiB load flushes ~50 times.
++//
++// Submitting zero commands would flush too, but the wasi glue's wgpuQueueSubmit
++// mallocs for the command list and treats a null return as OOM, and malloc(0)
++// is allowed to return null. An empty encoder avoids relying on that.
++static void ggml_webgpu_flush_writes(webgpu_global_context ctx, size_t bytes) {
++    static constexpr uint64_t FLUSH_THRESHOLD = 256ull << 20;  // 256 MiB
++
++    ctx->bytes_since_submit += bytes;
++    if (ctx->bytes_since_submit < FLUSH_THRESHOLD) {
++        return;
++    }
++    wgpu::CommandEncoder encoder  = ctx->device.CreateCommandEncoder();
++    wgpu::CommandBuffer  commands = encoder.Finish();
++    ctx->queue.Submit(1, &commands);
++    ctx->bytes_since_submit = 0;
++}
++
+ static void ggml_backend_webgpu_set_tensor_async(ggml_backend_t backend,
+                                                  ggml_tensor *  tensor,
+                                                  const void *   data,
+@@ -3734,6 +3767,7 @@
+ 
+     // Write aligned portion
+     buf_ctx->global_ctx->queue.WriteBuffer(buf_ctx->buffer, total_offset, data, (size / 4) * 4);
++    ggml_webgpu_flush_writes(buf_ctx->global_ctx, (size / 4) * 4);
+ 
+     if (size % 4 != 0) {
+         // If size is not a multiple of 4, we need to memset the remaining bytes
+@@ -3859,6 +3893,7 @@
+ 
+     if (size > 0) {
+         buf_ctx->global_ctx->queue.WriteBuffer(buf_ctx->buffer, total_offset, data, (size / 4) * 4);
++        ggml_webgpu_flush_writes(buf_ctx->global_ctx, (size / 4) * 4);
+     }
+ 
+     if (size % 4 != 0) {
