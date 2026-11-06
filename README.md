@@ -66,6 +66,8 @@ The patches apply to exactly that tag, so move them together. With
 tools (`llama-bench`, `llama-simple`) for wasm32-wasip3, with the headers wasi-libc lacks in
 `cmake/wasi-shims*`.
 
+Fetched dependencies are unpacked into `deps/` and shared by every build directory.
+
 ## Generate Bindings
 ```shell
 cmake --build build --target regenerate-bindings

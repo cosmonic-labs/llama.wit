@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.24)
 project(llama-cpp-wit C CXX)
 
+# Fetched dependencies live in deps/ (gitignored) instead of inside each build
+# tree, so the build-* dirs share one checkout. Override with -DFETCHCONTENT_BASE_DIR.
+set(FETCHCONTENT_BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps CACHE PATH "Where fetched dependencies are unpacked")
+
 include(FetchContent)
 
 # patches/ applies to exactly this tag: move them together.
@@ -49,13 +53,26 @@ set_target_properties(dawn::webgpu_dawn PROPERTIES
 
 file(GLOB LLAMA_PATCHES ${CMAKE_CURRENT_SOURCE_DIR}/patches/*.patch)
 list(SORT LLAMA_PATCHES)
+# FetchContent reruns the patch step only when its command changes, so the
+# series' hash rides along in it: editing a patch reaches a populated tree.
+set(_llama_patches_hash "")
+foreach(_patch IN LISTS LLAMA_PATCHES)
+    file(SHA256 ${_patch} _patch_hash)
+    string(APPEND _llama_patches_hash ${_patch_hash})
+endforeach()
+string(SHA256 _llama_patches_hash "${_llama_patches_hash}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${LLAMA_PATCHES})
 # Resets the checkout first, so a rerun applies the series to a clean tree.
+# llama is the one dependency added with add_subdirectory, so its build tree
+# stays per build directory; only the checkout is shared through deps/.
 FetchContent_Declare(llama
     GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
     GIT_TAG ${LLAMA_GIT_TAG}
     GIT_SHALLOW TRUE
+    BINARY_DIR ${CMAKE_BINARY_DIR}/llama-build
     PATCH_COMMAND git checkout -q -- .
           COMMAND git apply ${LLAMA_PATCHES}
+          COMMAND ${CMAKE_COMMAND} -E echo "llama.cpp patches ${_llama_patches_hash}"
 )
 FetchContent_MakeAvailable(llama)
 
