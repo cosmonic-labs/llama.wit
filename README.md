@@ -58,6 +58,7 @@ consumer builds the same source:
 | 0005 | model reads in 64 MiB chunks on WASI: a component-model stream read traps at 256 MiB |
 | 0006 | ggml-webgpu's buffer size limit is capped at `SIZE_MAX/2` on 32-bit targets, so weight buffers split below 4 GiB |
 | 0007 | ggml-webgpu lowercases the adapter vendor, so its dp4a path also turns on for "NVIDIA" from wgpu-native |
+| 0008 | the loader visits tensors in file order across every context, so a stream-backed `FILE *` only seeks forward; a tied output is copied from `token_embd` instead of read twice |
 
 The patches apply to exactly that tag, so move them together. With
 `-DFETCHCONTENT_SOURCE_DIR_LLAMA=/path/...` the local checkout is used as it is, unpatched.
