@@ -63,6 +63,7 @@ consumer builds the same source:
 | 0010 | ggml-webgpu stages op params and uploads them once per submit batch, which grows from 64 to 256 |
 | 0011 | ggml-webgpu caches bind groups and their layouts instead of rebuilding them for every dispatch |
 | 0012 | ggml-webgpu flushes queued buffer writes while loading, so a model's weights aren't held twice |
+| 0013 | ggml-webgpu skips a queue wait when nothing was submitted since the last, so synchronizing an idle backend never blocks (a wasip3 resource destructor or sync export cannot) |
 
 The patches apply to exactly that tag, so move them together. With
 `-DFETCHCONTENT_SOURCE_DIR_LLAMA=/path/...` the local checkout is used as it is, unpatched.
