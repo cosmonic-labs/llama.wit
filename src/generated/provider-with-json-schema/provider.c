@@ -560,6 +560,24 @@ void exports_cosmonic_llama_cpp_api_method_context_decode_return(exports_cosmoni
 }
 
 
+__attribute__((__export_name__("[callback][async-lift]cosmonic:llama-cpp/api@0.8.0#[method]context.memory-clear")))
+uint32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_memory_clear_callback(uint32_t event_raw, uint32_t waitable, uint32_t code) {
+  provider_event_t event;
+  event.event = (provider_event_code_t) event_raw;
+  event.waitable = waitable;
+  event.code = code;
+  return exports_cosmonic_llama_cpp_api_method_context_memory_clear_callback(&event);
+}
+
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[task-return][method]context.memory-clear")))
+void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_memory_clear__task_return();
+
+void exports_cosmonic_llama_cpp_api_method_context_memory_clear_return(void) {
+  
+  __wasm_export_exports_cosmonic_llama_cpp_api_method_context_memory_clear__task_return();
+}
+
+
 __attribute__((__export_name__("[callback][async-lift]cosmonic:llama-cpp/api@0.8.0#[method]context.get-embeddings-ith")))
 uint32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_get_embeddings_ith_callback(uint32_t event_raw, uint32_t waitable, uint32_t code) {
   provider_event_t event;
@@ -1056,9 +1074,10 @@ int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_decode(uint8
   return ret;
 }
 
-__attribute__((__export_name__("cosmonic:llama-cpp/api@0.8.0#[method]context.memory-clear")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_method_context_memory_clear(uint8_t * arg, int32_t arg0) {
-  exports_cosmonic_llama_cpp_api_method_context_memory_clear(((exports_cosmonic_llama_cpp_api_context_t*) arg), arg0);
+__attribute__((__export_name__("[async-lift]cosmonic:llama-cpp/api@0.8.0#[method]context.memory-clear")))
+int32_t __wasm_export_exports_cosmonic_llama_cpp_api_method_context_memory_clear(uint8_t * arg, int32_t arg0) {
+  provider_callback_code_t ret = exports_cosmonic_llama_cpp_api_method_context_memory_clear(((exports_cosmonic_llama_cpp_api_context_t*) arg), arg0);
+  return ret;
 }
 
 __attribute__((__export_name__("cosmonic:llama-cpp/api@0.8.0#[method]context.memory-seq-rm")))

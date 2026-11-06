@@ -44,7 +44,7 @@ pub async fn embeddings() -> Result<(), String> {
         "A puppy runs outdoors.",
         "The database transaction was rolled back.",
     ] {
-        context.memory_clear(true);
+        context.memory_clear(true).await;
         inference::decode(&context, model.tokenize(input, true, true)?).await?;
         let vector = context
             .get_embeddings_seq(0)

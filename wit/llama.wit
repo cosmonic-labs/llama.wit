@@ -142,8 +142,9 @@ interface api {
         /// processed stay in the memory.
         decode: async func(tokens: list<u32>) -> result<_, s32>;
 
-        /// `llama_memory_clear`. With `data` the buffers are zeroed too.
-        memory-clear: func(data: bool);
+        /// `llama_memory_clear`. With `data` the buffers are zeroed too, on the
+        /// GPU, which is why this is async.
+        memory-clear: async func(data: bool);
 
         /// `llama_memory_seq_rm`: removes positions `[p0, p1)` of `seq-id`.
         /// `seq-id < 0` matches any sequence, `p0 < 0` means 0, `p1 < 0` means

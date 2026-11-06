@@ -170,7 +170,7 @@ pub async fn context_limits() -> Result<(), String> {
     if !context.memory_seq_rm(0, 2, -1) || context.memory_seq_pos_max(0) != 1 {
         return Err("memory-seq-rm did not keep the prefix".into());
     }
-    context.memory_clear(true);
+    context.memory_clear(true).await;
     if context.memory_seq_pos_min(0) != -1 || context.memory_seq_pos_max(0) != -1 {
         return Err("memory-clear left tokens".into());
     }
@@ -322,7 +322,7 @@ pub async fn reuse(source: &models::HfModel, rounds: u32) -> Result<(), String> 
             .count()
             .min(tokens.len().saturating_sub(1));
         if !context.memory_seq_rm(0, shared as i32, -1) {
-            context.memory_clear(true);
+            context.memory_clear(true).await;
             shared = 0;
         }
         decode(&context, tokens[shared..].to_vec()).await?;

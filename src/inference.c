@@ -565,6 +565,9 @@ static bool context_create(
         set_err(err, "failed to create context");
         return false;
     }
+    // Leave the GPU idle: resource destructors and sync exports cannot wait on
+    // it, and llama_free synchronizes.
+    llama_synchronize(c);
     context_t * rep = (context_t *) malloc(sizeof(context_t));
     rep->ctx = c;
     rep->model = model_retain(model);
@@ -624,6 +627,8 @@ provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_decode(
         context_t * self, provider_list_u32_t * tokens) {
     exports_cosmonic_llama_cpp_api_result_void_s32_t ret;
     int32_t code = context_decode(self, tokens);
+    // Leave the GPU idle, as in context_create.
+    llama_synchronize(self->ctx);
     ret.is_err = code != 0;
     ret.val.err = code;
     provider_list_u32_free(tokens);
@@ -637,8 +642,18 @@ provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_decode_ca
     abort();
 }
 
-void exports_cosmonic_llama_cpp_api_method_context_memory_clear(context_t * self, bool data) {
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_memory_clear(context_t * self, bool data) {
     llama_memory_clear(llama_get_memory(self->ctx), data);
+    // Zeroing the buffers runs on the GPU; leave it idle, as in context_create.
+    llama_synchronize(self->ctx);
+    exports_cosmonic_llama_cpp_api_method_context_memory_clear_return();
+    return PROVIDER_CALLBACK_CODE_EXIT;
+}
+
+provider_callback_code_t exports_cosmonic_llama_cpp_api_method_context_memory_clear_callback(provider_event_t * event) {
+    (void) event;
+    // exports_cosmonic_llama_cpp_api_method_context_memory_clear never returns yield/wait
+    abort();
 }
 
 bool exports_cosmonic_llama_cpp_api_method_context_memory_seq_rm(
