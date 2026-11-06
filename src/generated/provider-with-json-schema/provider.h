@@ -267,10 +267,10 @@ typedef struct {
   } val;
 } exports_cosmonic_llama_cpp_api_result_u32_string_t;
 
-// Exported Functions from `cosmonic:llama-cpp/json-schema@0.7.0`
+// Exported Functions from `cosmonic:llama-cpp/json-schema@0.8.0-control-demo.1`
 bool exports_cosmonic_llama_cpp_json_schema_to_grammar(provider_string_t *schema, provider_string_t *ret, provider_string_t *err);
 
-// Exported Functions from `cosmonic:llama-cpp/api@0.7.0`
+// Exported Functions from `cosmonic:llama-cpp/api@0.8.0-control-demo.1`
 bool exports_cosmonic_llama_cpp_api_chat_apply_template(provider_string_t *tmpl, exports_cosmonic_llama_cpp_api_list_chat_message_t *chat, bool add_ass, provider_string_t *ret, provider_string_t *err);
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(exports_cosmonic_llama_cpp_api_stream_u8_t data, uint64_t size, exports_cosmonic_llama_cpp_api_model_params_t *maybe_params);
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create_callback(provider_event_t *event);

@@ -4,7 +4,9 @@ name: CI
 # and checks it against wit/, once per world: `provider` exports the llama.h
 # API, `provider-with-json-schema` also exports llama.cpp's JSON Schema to GBNF
 # converter. On main it also publishes both to GHCR with a Sigstore-signed
-# build-provenance attestation.
+# build-provenance attestation. So does integration/control-demo, which may only
+# publish `-control-demo.N` prereleases, so it never takes a version main will
+# release.
 #
 # The package version in wit/llama.wit is the release version. A merge to main
 # that bumps it publishes that version; any other merge finds the version
@@ -14,7 +16,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration/control-demo]
   pull_request:
   # Retries a publish from main without a new commit, e.g. after a registry outage.
   workflow_dispatch:
@@ -214,9 +216,11 @@ jobs:
   publish:
     name: Publish to GHCR (${{ matrix.world }})
     needs: build
-    # Upstream main only: on a fork, IMAGE still names the cosmonic-labs
-    # namespace, which the fork's token cannot write to.
-    if: github.repository == 'cosmonic-labs/llama.wit' && github.ref == 'refs/heads/main'
+    # Upstream main and integration/control-demo only: on a fork, IMAGE still
+    # names the cosmonic-labs namespace, which the fork's token cannot write to.
+    if: >-
+      github.repository == 'cosmonic-labs/llama.wit' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/integration/control-demo')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -249,6 +253,12 @@ jobs:
       IMAGE: ${{ matrix.image }}
       ARTIFACT: ${{ matrix.artifact }}
     steps:
+      - name: Refuse a release version from the integration branch
+        if: github.ref == 'refs/heads/integration/control-demo'
+        run: |
+          [[ "$VERSION" =~ -control-demo\.[0-9]+$ ]] ||
+            { echo "::error::integration/control-demo publishes only <version>-control-demo.N, not $VERSION"; exit 1; }
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ matrix.artifact }}

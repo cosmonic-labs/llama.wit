@@ -1,4 +1,4 @@
-package cosmonic:llama-cpp@0.7.0;
+package cosmonic:llama-cpp@0.8.0-control-demo.1;
 
 /// llama.cpp's public API, `llama.h`, as WIT. Each function names the `llama.h`
 /// function it wraps. They differ only where WIT needs it: resources instead of

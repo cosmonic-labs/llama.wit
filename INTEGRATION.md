@@ -17,19 +17,22 @@ for the series' `0004` and `0006`.
 
 ## API
 
-`wit/llama.wit` is `cosmonic:llama-cpp@0.7.0` with `large-models`' change to
-`model.create`, which now takes `data: stream<u8>, size: u64`. That is a
-breaking change still numbered 0.7.0, and it needs a version bump before it
-reaches `main`. Control's `llama-inference` imports `cosmonic:llama-cpp/api@0.6.0`,
-so it has to move to this API before it can use this build.
+`wit/llama.wit` is `cosmonic:llama-cpp@0.8.0-control-demo.N`: main's 0.7.0
+with `large-models`' change to `model.create`, which takes
+`data: stream<u8>, size: u64`. The prerelease suffix keeps it off every
+version main will release.
+
+## Publishing
+
+A push here publishes both worlds to GHCR, like a merge to main, as
+`ghcr.io/cosmonic-labs/cosmonic/llama-cpp:<version>` and
+`.../llama-cpp-with-json-schema:<version>`. CI refuses any version without a
+`-control-demo.N` suffix. A published version never moves, so bump `N` in
+`wit/llama.wit`, regenerate the bindings, and commit them together to publish
+a change.
 
 ## Using it from Control
 
-CI doesn't publish from this branch. Dispatch `ci.yml` on it, take the
-`llama-cpp` artifact (or run `wash build` here), and put the component where
-Control's build looks first:
-
-```sh
-cp build/llama-cpp.wasm "$CONTROL/components/rust/build/llama-cpp.wasm"
-make -C "$CONTROL" build-llm-app
-```
+Control's `llama-inference` imports `api` and `json-schema` at this version and
+pins `LLM_LLAMA_ENGINE_VERSION` to it. Its Makefile pulls
+`llama-cpp-with-json-schema`.
