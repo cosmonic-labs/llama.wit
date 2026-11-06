@@ -61,6 +61,7 @@ consumer builds the same source:
 | 0008 | the loader visits tensors in file order across every context, so a stream-backed `FILE *` only seeks forward; a tied output is copied from `token_embd` instead of read twice |
 | 0009 | ggml-webgpu on WASI advertises async uploads, events and a host buffer type, so GPU-bound tensors stream through small staging buffers instead of a host copy each |
 | 0010 | ggml-webgpu stages op params and uploads them once per submit batch, which grows from 64 to 256 |
+| 0011 | ggml-webgpu caches bind groups and their layouts instead of rebuilding them for every dispatch |
 
 The patches apply to exactly that tag, so move them together. With
 `-DFETCHCONTENT_SOURCE_DIR_LLAMA=/path/...` the local checkout is used as it is, unpatched.
