@@ -417,23 +417,11 @@ uint32_t __wasm_export_exports_cosmonic_llama_cpp_api_static_model_create_callba
 }
 
 __attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[task-return][static]model.create")))
-void __wasm_export_exports_cosmonic_llama_cpp_api_static_model_create__task_return(int32_t, uint8_t *, size_t);
+void __wasm_export_exports_cosmonic_llama_cpp_api_static_model_create__task_return(int32_t, int32_t);
 
-void exports_cosmonic_llama_cpp_api_static_model_create_return(exports_cosmonic_llama_cpp_api_result_own_model_string_t ret) {
-  int32_t result;
-  uint8_t * result4;
-  size_t result5;
-  if ((ret).is_err) {
-    const provider_string_t *payload3 = &(ret).val.err;result = 1;
-    result4 = (uint8_t *) (*payload3).ptr;
-    result5 = (*payload3).len;
-  } else {
-    const exports_cosmonic_llama_cpp_api_own_model_t *payload = &(ret).val.ok;result = 0;
-    result4 = (uint8_t *) (*payload).__handle;
-    result5 = 0;
-  }
-
-  __wasm_export_exports_cosmonic_llama_cpp_api_static_model_create__task_return(result, result4, result5);
+void exports_cosmonic_llama_cpp_api_static_model_create_return(exports_cosmonic_llama_cpp_api_tuple2_stream_f32_future_result_own_model_string_t ret) {
+  
+  __wasm_export_exports_cosmonic_llama_cpp_api_static_model_create__task_return(((int32_t) (ret).f0), ((int32_t) (ret).f1));
 }
 
 
@@ -480,6 +468,98 @@ void exports_cosmonic_llama_cpp_api_stream_u8_drop_readable(exports_cosmonic_lla
 
 void exports_cosmonic_llama_cpp_api_stream_u8_drop_writable(exports_cosmonic_llama_cpp_api_stream_u8_writer_t writer) {
   exports_cosmonic_llama_cpp_api_stream_u8__drop_writable(writer);
+}
+
+
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[stream-new-1][static]model.create")))
+extern uint64_t exports_cosmonic_llama_cpp_api_stream_f32__new(void);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[async-lower][stream-read-1][static]model.create")))
+extern uint32_t exports_cosmonic_llama_cpp_api_stream_f32__read(uint32_t, uint8_t*, size_t);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[async-lower][stream-write-1][static]model.create")))
+extern uint32_t exports_cosmonic_llama_cpp_api_stream_f32__write(uint32_t, const uint8_t*, size_t);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[stream-cancel-read-1][static]model.create")))
+extern uint32_t exports_cosmonic_llama_cpp_api_stream_f32__cancel_read(uint32_t);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[stream-cancel-write-1][static]model.create")))
+extern uint32_t exports_cosmonic_llama_cpp_api_stream_f32__cancel_write(uint32_t);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[stream-drop-readable-1][static]model.create")))
+extern void exports_cosmonic_llama_cpp_api_stream_f32__drop_readable(uint32_t);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[stream-drop-writable-1][static]model.create")))
+extern void exports_cosmonic_llama_cpp_api_stream_f32__drop_writable(uint32_t);
+
+exports_cosmonic_llama_cpp_api_stream_f32_t exports_cosmonic_llama_cpp_api_stream_f32_new(exports_cosmonic_llama_cpp_api_stream_f32_writer_t *writer) {
+  uint64_t packed = exports_cosmonic_llama_cpp_api_stream_f32__new();
+  *writer = (uint32_t) (packed >> 32);
+  return (uint32_t) packed;
+}
+
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_stream_f32_read(exports_cosmonic_llama_cpp_api_stream_f32_t reader, float *buf, size_t amt) {
+  return exports_cosmonic_llama_cpp_api_stream_f32__read(reader, (uint8_t*) buf, amt);
+}
+
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_stream_f32_write(exports_cosmonic_llama_cpp_api_stream_f32_writer_t writer, const float *buf, size_t amt) {
+  return exports_cosmonic_llama_cpp_api_stream_f32__write(writer, (const uint8_t*) buf, amt);
+}
+
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_stream_f32_cancel_read(exports_cosmonic_llama_cpp_api_stream_f32_t reader){
+  return exports_cosmonic_llama_cpp_api_stream_f32__cancel_read(reader);
+}
+
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_stream_f32_cancel_write(exports_cosmonic_llama_cpp_api_stream_f32_writer_t writer) {
+  return exports_cosmonic_llama_cpp_api_stream_f32__cancel_write(writer);
+}
+
+void exports_cosmonic_llama_cpp_api_stream_f32_drop_readable(exports_cosmonic_llama_cpp_api_stream_f32_t reader){
+  exports_cosmonic_llama_cpp_api_stream_f32__drop_readable(reader);
+}
+
+void exports_cosmonic_llama_cpp_api_stream_f32_drop_writable(exports_cosmonic_llama_cpp_api_stream_f32_writer_t writer) {
+  exports_cosmonic_llama_cpp_api_stream_f32__drop_writable(writer);
+}
+
+
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[future-new-2][static]model.create")))
+extern uint64_t exports_cosmonic_llama_cpp_api_future_result_own_model_string__new(void);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[async-lower][future-read-2][static]model.create")))
+extern uint32_t exports_cosmonic_llama_cpp_api_future_result_own_model_string__read(uint32_t, uint8_t*);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[async-lower][future-write-2][static]model.create")))
+extern uint32_t exports_cosmonic_llama_cpp_api_future_result_own_model_string__write(uint32_t, const uint8_t*);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[future-cancel-read-2][static]model.create")))
+extern uint32_t exports_cosmonic_llama_cpp_api_future_result_own_model_string__cancel_read(uint32_t);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[future-cancel-write-2][static]model.create")))
+extern uint32_t exports_cosmonic_llama_cpp_api_future_result_own_model_string__cancel_write(uint32_t);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[future-drop-readable-2][static]model.create")))
+extern void exports_cosmonic_llama_cpp_api_future_result_own_model_string__drop_readable(uint32_t);
+__attribute__((__import_module__("[export]cosmonic:llama-cpp/api@0.8.0"), __import_name__("[future-drop-writable-2][static]model.create")))
+extern void exports_cosmonic_llama_cpp_api_future_result_own_model_string__drop_writable(uint32_t);
+
+exports_cosmonic_llama_cpp_api_future_result_own_model_string_t exports_cosmonic_llama_cpp_api_future_result_own_model_string_new(exports_cosmonic_llama_cpp_api_future_result_own_model_string_writer_t *writer) {
+  uint64_t packed = exports_cosmonic_llama_cpp_api_future_result_own_model_string__new();
+  *writer = (uint32_t) (packed >> 32);
+  return (uint32_t) packed;
+}
+
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_future_result_own_model_string_read(exports_cosmonic_llama_cpp_api_future_result_own_model_string_t reader, exports_cosmonic_llama_cpp_api_result_own_model_string_t *buf) {
+  return exports_cosmonic_llama_cpp_api_future_result_own_model_string__read(reader, (uint8_t*) buf);
+}
+
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_future_result_own_model_string_write(exports_cosmonic_llama_cpp_api_future_result_own_model_string_writer_t writer, const exports_cosmonic_llama_cpp_api_result_own_model_string_t *buf) {
+  return exports_cosmonic_llama_cpp_api_future_result_own_model_string__write(writer, (const uint8_t*) buf);
+}
+
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_future_result_own_model_string_cancel_read(exports_cosmonic_llama_cpp_api_future_result_own_model_string_t reader){
+  return exports_cosmonic_llama_cpp_api_future_result_own_model_string__cancel_read(reader);
+}
+
+provider_waitable_status_t exports_cosmonic_llama_cpp_api_future_result_own_model_string_cancel_write(exports_cosmonic_llama_cpp_api_future_result_own_model_string_writer_t writer) {
+  return exports_cosmonic_llama_cpp_api_future_result_own_model_string__cancel_write(writer);
+}
+
+void exports_cosmonic_llama_cpp_api_future_result_own_model_string_drop_readable(exports_cosmonic_llama_cpp_api_future_result_own_model_string_t reader){
+  exports_cosmonic_llama_cpp_api_future_result_own_model_string__drop_readable(reader);
+}
+
+void exports_cosmonic_llama_cpp_api_future_result_own_model_string_drop_writable(exports_cosmonic_llama_cpp_api_future_result_own_model_string_writer_t writer) {
+  exports_cosmonic_llama_cpp_api_future_result_own_model_string__drop_writable(writer);
 }
 
 
