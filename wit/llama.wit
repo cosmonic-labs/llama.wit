@@ -1,8 +1,8 @@
-package cosmonic:llama-cpp@0.7.0;
+package cosmonic:llama-cpp@0.8.0;
 
 /// llama.cpp's public API, `llama.h`, as WIT. Each function names the `llama.h`
 /// function it wraps. They differ only where WIT needs it: resources instead of
-/// pointers, `result`/`option` instead of NULL and error codes, `list<u8>` for
+/// pointers, `result`/`option` instead of NULL and error codes, `stream<u8>` for
 /// files, and checks that turn llama.cpp's asserts into errors.
 ///
 /// `model` is `llama_model` and its `llama_vocab`, `context` is `llama_context`,
@@ -61,9 +61,20 @@ interface api {
     /// A loaded model and its vocabulary. Any number of contexts can be created
     /// from one model.
     resource model {
-        /// `llama_model_load_from_file_ptr`, over the bytes of a GGUF file so
-        /// the provider does no filesystem I/O.
-        create: static async func(data: list<u8>, params: option<model-params>) -> result<model, string>;
+        /// `llama_model_load_from_file_ptr`, over a stream of the bytes of a
+        /// GGUF file so the provider does no filesystem I/O. The file is read
+        /// in order and never held in memory whole, so models larger than
+        /// linear memory load. `size` is the file's length in bytes, which a
+        /// stream does not carry.
+        ///
+        /// Returns as the load starts. The stream carries the fraction of the
+        /// weights loaded, from 0.0 to 1.0, as `llama_progress_callback` sees
+        /// it, and ends when the load does. It holds only the latest value, so
+        /// a reader that falls behind skips values rather than stalling the
+        /// load. The future then resolves to the model. Read it, or drop it,
+        /// once the stream ends: until then the provider waits on it, as it
+        /// does on the load.
+        create: static async func(data: stream<u8>, size: u64, params: option<model-params>) -> tuple<stream<f32>, future<result<model, string>>>;
 
         /// `llama_tokenize`. `add-special` adds the model's start tokens (such
         /// as BOS); `parse-special` turns special-token text into those tokens.
@@ -139,8 +150,9 @@ interface api {
         /// processed stay in the memory.
         decode: async func(tokens: list<u32>) -> result<_, s32>;
 
-        /// `llama_memory_clear`. With `data` the buffers are zeroed too.
-        memory-clear: func(data: bool);
+        /// `llama_memory_clear`. With `data` the buffers are zeroed too, on the
+        /// GPU, which is why this is async.
+        memory-clear: async func(data: bool);
 
         /// `llama_memory_seq_rm`: removes positions `[p0, p1)` of `seq-id`.
         /// `seq-id < 0` matches any sequence, `p0 < 0` means 0, `p1 < 0` means
@@ -162,13 +174,14 @@ interface api {
         /// `llama_get_embeddings_ith`: the embedding of the `i`th token of the
         /// last `decode`, `n-embd-out` long. Negative `i` counts from the end.
         /// `none` for an invalid `i`, a context without `embeddings`, or pooling
-        /// other than `none`.
-        get-embeddings-ith: func(i: s32) -> option<list<f32>>;
+        /// other than `none`. Async because llama.cpp synchronizes the backend
+        /// before it reads them.
+        get-embeddings-ith: async func(i: s32) -> option<list<f32>>;
 
         /// `llama_get_embeddings_seq`: the pooled embedding of `seq-id`,
         /// `n-embd-out` long, or `n-cls-out` long for `rank` pooling. `none` with
-        /// pooling `none`.
-        get-embeddings-seq: func(seq-id: s32) -> option<list<f32>>;
+        /// pooling `none`. Async like `get-embeddings-ith`.
+        get-embeddings-seq: async func(seq-id: s32) -> option<list<f32>>;
     }
 
     /// `llama_sampler`. Build a chain with `chain-init` and `chain-add`, as in

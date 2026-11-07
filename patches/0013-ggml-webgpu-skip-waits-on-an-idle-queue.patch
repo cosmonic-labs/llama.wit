@@ -1,0 +1,81 @@
+diff --git a/ggml/src/ggml-webgpu/ggml-webgpu.cpp b/ggml/src/ggml-webgpu/ggml-webgpu.cpp
+index 1ef74477b..8897500f2 100644
+--- a/ggml/src/ggml-webgpu/ggml-webgpu.cpp
++++ b/ggml/src/ggml-webgpu/ggml-webgpu.cpp
+@@ -219,6 +219,10 @@ struct webgpu_global_context_struct {
+     wgpu::Queue    queue;
+     uint32_t       command_submit_batch_size = WEBGPU_DEFAULT_COMMAND_SUBMIT_BATCH_SIZE;
+     uint32_t       max_inflight_batches      = UINT32_MAX;
++    // Set by every submit and queue write, cleared by a queue wait. Waiting on
++    // an idle queue still blocks until the work-done callback runs, which a
++    // caller that may not block (a wasip3 resource destructor, say) cannot do.
++    std::atomic<bool> queue_pending{ false };
+ 
+     webgpu_capabilities  capabilities;
+     // Shared buffer to move data from device to host
+@@ -556,6 +560,9 @@ static uint32_t ggml_backend_webgpu_get_command_submit_batch_size() {
+ }
+ 
+ static void ggml_backend_webgpu_wait_queue(webgpu_global_context & ctx) {
++    if (!ctx->queue_pending.exchange(false)) {
++        return;
++    }
+     wgpu::QueueWorkDoneStatus callback_status = wgpu::QueueWorkDoneStatus::Error;
+     std::string               callback_message;
+ 
+@@ -601,6 +608,7 @@ static void ggml_backend_webgpu_submit_commands(webgpu_context &          ctx,
+     }
+ 
+     ctx->global_ctx->queue.Submit(1, &commands);
++    ctx->global_ctx->queue_pending = true;
+     num_inflight_batches++;
+ }
+ 
+@@ -759,6 +767,7 @@ static void ggml_backend_webgpu_buffer_memset(webgpu_global_context & ctx,
+         compute_2d_workgroups(total_wg, ctx->capabilities.limits.maxComputeWorkgroupsPerDimension, wg_x, wg_y);
+ 
+         ctx->queue.WriteBuffer(ctx->memset_params_buf, 0, params.data(), params.size() * sizeof(uint32_t));
++        ctx->queue_pending = true;
+ 
+         wgpu::BindGroupEntry params_entry = {};
+         params_entry.binding              = 1;
+@@ -784,6 +793,7 @@ static void ggml_backend_webgpu_buffer_memset(webgpu_global_context & ctx,
+         wgpu::CommandBuffer              command  = encoder.Finish();
+         std::vector<wgpu::CommandBuffer> commands = { command };
+         ctx->queue.Submit(commands.size(), commands.data());
++        ctx->queue_pending = true;
+ 
+         offset += chunk_size;
+         size -= chunk_size;
+@@ -3856,6 +3866,7 @@ static void ggml_webgpu_flush_writes(webgpu_global_context ctx, size_t bytes) {
+     wgpu::CommandEncoder encoder  = ctx->device.CreateCommandEncoder();
+     wgpu::CommandBuffer  commands = encoder.Finish();
+     ctx->queue.Submit(1, &commands);
++    ctx->queue_pending = true;
+     ctx->bytes_since_submit = 0;
+ }
+ 
+@@ -3870,6 +3881,7 @@ static void ggml_backend_webgpu_set_tensor_async(ggml_backend_t backend,
+ 
+     // Write aligned portion
+     buf_ctx->global_ctx->queue.WriteBuffer(buf_ctx->buffer, total_offset, data, (size / 4) * 4);
++    buf_ctx->global_ctx->queue_pending = true;
+     ggml_webgpu_flush_writes(buf_ctx->global_ctx, (size / 4) * 4);
+ 
+     if (size % 4 != 0) {
+@@ -3996,6 +4008,7 @@ static void ggml_backend_webgpu_buffer_set_tensor(ggml_backend_buffer_t buffer,
+ 
+     if (size > 0) {
+         buf_ctx->global_ctx->queue.WriteBuffer(buf_ctx->buffer, total_offset, data, (size / 4) * 4);
++        buf_ctx->global_ctx->queue_pending = true;
+         ggml_webgpu_flush_writes(buf_ctx->global_ctx, (size / 4) * 4);
+     }
+ 
+@@ -4063,6 +4076,7 @@ static void ggml_backend_webgpu_buffer_get_tensor(ggml_backend_buffer_t buffer,
+ 
+     // Submit the command buffer to the queue
+     buf_ctx->global_ctx->queue.Submit(1, &commands);
++    buf_ctx->global_ctx->queue_pending = true;
+ 
+     // Map the staging buffer to read the data
+     ggml_backend_webgpu_map_buffer(buf_ctx->global_ctx, buf_ctx->global_ctx->get_tensor_staging_buf,

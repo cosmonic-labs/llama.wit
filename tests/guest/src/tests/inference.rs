@@ -5,11 +5,11 @@ use crate::cosmonic::llama_cpp::api::{
 use crate::models;
 
 pub async fn load(source: &models::HfModel) -> Result<Model, String> {
-    Model::create(
-        models::load(source)?,
-        Some(ModelParams { n_gpu_layers: 99 }),
-    )
-    .await
+    let (data, size, errors) = models::stream(source)?;
+    let (progress, model) = Model::create(data, size, Some(ModelParams { n_gpu_layers: 99 })).await;
+    // Dropped unread, so the provider loads with no one reading its progress.
+    drop(progress);
+    model.await.map_err(|e| errors.explain(e))
 }
 
 pub fn chain(samplers: Vec<Sampler>) -> Result<Sampler, String> {
@@ -171,7 +171,7 @@ pub async fn context_limits() -> Result<(), String> {
     if !context.memory_seq_rm(0, 2, -1) || context.memory_seq_pos_max(0) != 1 {
         return Err("memory-seq-rm did not keep the prefix".into());
     }
-    context.memory_clear(true);
+    context.memory_clear(true).await;
     if context.memory_seq_pos_min(0) != -1 || context.memory_seq_pos_max(0) != -1 {
         return Err("memory-clear left tokens".into());
     }
@@ -280,12 +280,13 @@ pub async fn embeddings() -> Result<(), String> {
     let tokens = model.tokenize("Once upon a time", true, true)?;
     let n = tokens.len() as i32;
     decode(&context, tokens).await?;
-    if context.get_embeddings_seq(0).is_some() {
+    if context.get_embeddings_seq(0).await.is_some() {
         return Err("pooled embedding without pooling".into());
     }
     for i in [0, n - 1, -1] {
         let vector = context
             .get_embeddings_ith(i)
+            .await
             .ok_or(format!("no embedding for token {i}"))?;
         if vector.len() != model.n_embd_out() as usize
             || !vector.iter().all(|x| x.is_finite())
@@ -294,7 +295,7 @@ pub async fn embeddings() -> Result<(), String> {
             return Err("invalid embedding vector".into());
         }
     }
-    if context.get_embeddings_ith(n).is_some() {
+    if context.get_embeddings_ith(n).await.is_some() {
         return Err("embedding past the last token".into());
     }
     Ok(())
@@ -322,7 +323,7 @@ pub async fn reuse(source: &models::HfModel, rounds: u32) -> Result<(), String> 
             .count()
             .min(tokens.len().saturating_sub(1));
         if !context.memory_seq_rm(0, shared as i32, -1) {
-            context.memory_clear(true);
+            context.memory_clear(true).await;
             shared = 0;
         }
         decode(&context, tokens[shared..].to_vec()).await?;

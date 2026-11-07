@@ -44,15 +44,16 @@ pub async fn embeddings() -> Result<(), String> {
         "A puppy runs outdoors.",
         "The database transaction was rolled back.",
     ] {
-        context.memory_clear(true);
+        context.memory_clear(true).await;
         inference::decode(&context, model.tokenize(input, true, true)?).await?;
         let vector = context
             .get_embeddings_seq(0)
+            .await
             .ok_or("BGE gave no pooled embedding")?;
         if vector.len() != 384 || !vector.iter().all(|x| x.is_finite()) {
             return Err("invalid BGE vector".into());
         }
-        if context.get_embeddings_ith(0).is_some() {
+        if context.get_embeddings_ith(0).await.is_some() {
             return Err("per-token embedding with pooling".into());
         }
         vectors.push(vector);

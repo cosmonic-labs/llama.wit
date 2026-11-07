@@ -7,14 +7,27 @@ const PROMPT: &str = "Once upon a time";
 const N_GPU_LAYERS: i32 = 99;
 
 pub async fn run() -> Result<(), String> {
-    let bytes = models::load(&models::STORIES_260K)?;
-    let model = Model::create(
-        bytes,
+    let (data, size, errors) = models::stream(&models::STORIES_260K)?;
+    let (mut progress, model) = Model::create(
+        data,
+        size,
         Some(ModelParams {
             n_gpu_layers: N_GPU_LAYERS,
         }),
     )
-    .await?;
+    .await;
+    let mut seen = Vec::new();
+    while let Some(fraction) = progress.next().await {
+        seen.push(fraction);
+    }
+    if seen.is_empty()
+        || seen.windows(2).any(|pair| pair[1] < pair[0])
+        || seen.iter().any(|fraction| !(0.0..=1.0).contains(fraction))
+    {
+        return Err(format!("load progress went {seen:?}, not up within 0.0 to 1.0"));
+    }
+    // Read only after the progress ends, so the provider has to wait for it.
+    let model = model.await.map_err(|e| errors.explain(e))?;
 
     let context = Context::create(&model, None).await?;
     let prompt = model.tokenize(PROMPT, true, true)?;

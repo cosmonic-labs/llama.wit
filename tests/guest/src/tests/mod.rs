@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::sync::LazyLock;
 
 mod inference;
+mod large;
 mod live;
 mod smoke;
 
@@ -14,6 +15,13 @@ static TESTS: &[(&str, TestFn)] = &[
     ("live/model-swaps", || Box::pin(live::model_swaps())),
     ("live/embeddings", || Box::pin(live::embeddings())),
     ("live/prompt-reuse", || Box::pin(live::prompt_reuse())),
+    ("large/qwen3-8b", || Box::pin(large::qwen3_8b())),
+    ("large/qwen3-8b-stress", || Box::pin(large::qwen3_8b_stress())),
+    ("large/mistral-24b-q2", || Box::pin(large::mistral_24b_q2())),
+    ("large/mistral-24b-q3", || Box::pin(large::mistral_24b_q3())),
+    ("large/mistral-24b-q3m", || Box::pin(large::mistral_24b_q3m())),
+    ("large/mistral-24b-q4", || Box::pin(large::mistral_24b_q4())),
+    ("large/mistral-24b-q8", || Box::pin(large::mistral_24b_q8())),
     ("token-bytes", || Box::pin(inference::token_bytes())),
     ("chat-template", || Box::pin(inference::chat_template())),
     ("model-lifetime", || Box::pin(inference::model_lifetime())),
