@@ -5,8 +5,9 @@ name: CI
 # API, `provider-with-json-schema` also exports llama.cpp's JSON Schema to GBNF
 # converter. On main it also publishes both to GHCR with a Sigstore-signed
 # build-provenance attestation. So does integration/control-demo, which may only
-# publish `-control-demo.N` prereleases, so it never takes a version main will
-# release.
+# publish `-rc.N` prereleases, so it never takes a version main will release.
+# There the cosmonic:llama-cpp WIT package, published with wkg, holds the
+# llama-cpp tag, so only llama-cpp-with-json-schema is pushed.
 #
 # The package version in wit/llama.wit is the release version. A merge to main
 # that bumps it publishes that version; any other merge finds the version
@@ -256,8 +257,8 @@ jobs:
       - name: Refuse a release version from the integration branch
         if: github.ref == 'refs/heads/integration/control-demo'
         run: |
-          [[ "$VERSION" =~ -control-demo\.[0-9]+$ ]] ||
-            { echo "::error::integration/control-demo publishes only <version>-control-demo.N, not $VERSION"; exit 1; }
+          [[ "$VERSION" =~ -rc\.[0-9]+$ ]] ||
+            { echo "::error::integration/control-demo publishes only <version>-rc.N, not $VERSION"; exit 1; }
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -287,6 +288,11 @@ jobs:
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/heads/integration/control-demo && "$ARTIFACT" == llama-cpp ]]; then
+            echo "::notice::${IMAGE}:${VERSION} holds the cosmonic:llama-cpp WIT package on this branch; not pushing the api-only component over it"
+            echo "action=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           name="${IMAGE#ghcr.io/}"
           token=$(curl -fsS -u "${GITHUB_ACTOR}:${REGISTRY_TOKEN}" \
             "https://ghcr.io/token?service=ghcr.io&scope=repository:${name}:pull" | jq -r '.token // empty')

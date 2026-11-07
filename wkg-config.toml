@@ -1,0 +1,13 @@
+# Maps cosmonic:llama-cpp to ghcr.io/cosmonic-labs/cosmonic/llama-cpp, the
+# path Control's wkg-config.toml fetches it from.
+default_registry = "ghcr.io"
+
+[namespace_registries.cosmonic]
+registry = "ghcr.io"
+
+[namespace_registries.cosmonic.metadata]
+preferredProtocol = "oci"
+
+[namespace_registries.cosmonic.metadata.oci]
+registry = "ghcr.io"
+namespacePrefix = "cosmonic-labs/"
