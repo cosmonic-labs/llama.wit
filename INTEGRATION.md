@@ -19,9 +19,10 @@ for the series' `0004` and `0006`.
 
 `wit/llama.wit` is `cosmonic:llama-cpp@0.8.0-rc.N`: main's 0.7.0 with
 `large-models`' change to `model.create`, which takes
-`data: stream<u8>, size: u64`, and with `memory-clear` and the embedding
-getters async, since they wait on the GPU. The prerelease suffix keeps it off
-every version main will release.
+`data: stream<u8>, size: u64` and returns the load's progress as a
+`stream<f32>` beside a future for the model, and with `memory-clear` and the
+embedding getters async, since they wait on the GPU. The prerelease suffix
+keeps it off every version main will release.
 
 ## Publishing
 

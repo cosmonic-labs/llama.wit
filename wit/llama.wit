@@ -1,4 +1,4 @@
-package cosmonic:llama-cpp@0.8.0-rc.1;
+package cosmonic:llama-cpp@0.8.0-rc.2;
 
 /// llama.cpp's public API, `llama.h`, as WIT. Each function names the `llama.h`
 /// function it wraps. They differ only where WIT needs it: resources instead of
@@ -66,7 +66,15 @@ interface api {
         /// in order and never held in memory whole, so models larger than
         /// linear memory load. `size` is the file's length in bytes, which a
         /// stream does not carry.
-        create: static async func(data: stream<u8>, size: u64, params: option<model-params>) -> result<model, string>;
+        ///
+        /// Returns as the load starts. The stream carries the fraction of the
+        /// weights loaded, from 0.0 to 1.0, as `llama_progress_callback` sees
+        /// it, and ends when the load does. It holds only the latest value, so
+        /// a reader that falls behind skips values rather than stalling the
+        /// load. The future then resolves to the model. Read it, or drop it,
+        /// once the stream ends: until then the provider waits on it, as it
+        /// does on the load.
+        create: static async func(data: stream<u8>, size: u64, params: option<model-params>) -> tuple<stream<f32>, future<result<model, string>>>;
 
         /// `llama_tokenize`. `add-special` adds the model's start tokens (such
         /// as BOS); `parse-special` turns special-token text into those tokens.

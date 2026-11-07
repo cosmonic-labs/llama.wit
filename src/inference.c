@@ -261,10 +261,47 @@ static int cookie_seek(void * vc, off_t * off, int whence) {
     return 0;
 }
 
-static bool model_create(
+// The progress stream holds only the latest value: each new value cancels a
+// write the reader has not taken yet, so a slow reader never stalls the load.
+typedef struct {
+    exports_cosmonic_llama_cpp_api_stream_f32_writer_t writer;
+    float value;   // what a pending write hands the reader
+    bool  pending;
+    bool  closed;  // the reader dropped the stream
+} load_progress_t;
+
+static void progress_settle(load_progress_t * p) {
+    if (!p->pending) {
+        return;
+    }
+    p->pending = false;
+    provider_waitable_status_t st = exports_cosmonic_llama_cpp_api_stream_f32_cancel_write(p->writer);
+    if (PROVIDER_WAITABLE_STATE(st) == PROVIDER_WAITABLE_DROPPED) {
+        p->closed = true;
+    }
+}
+
+static bool progress_report(float fraction, void * user) {
+    load_progress_t * p = (load_progress_t *) user;
+    progress_settle(p);
+    if (p->closed) {
+        return true;
+    }
+    p->value = fraction;
+    provider_waitable_status_t st = exports_cosmonic_llama_cpp_api_stream_f32_write(p->writer, &p->value, 1);
+    if (st == PROVIDER_WAITABLE_STATUS_BLOCKED) {
+        p->pending = true;
+    } else if (PROVIDER_WAITABLE_STATE(st) == PROVIDER_WAITABLE_DROPPED) {
+        p->closed = true;
+    }
+    return true;
+}
+
+static bool model_load(
         exports_cosmonic_llama_cpp_api_stream_u8_t data,
         uint64_t size,
         exports_cosmonic_llama_cpp_api_model_params_t * maybe_params,
+        load_progress_t * progress,
         exports_cosmonic_llama_cpp_api_own_model_t * ret,
         provider_string_t * err) {
     static bool inited = false;
@@ -289,6 +326,8 @@ static bool model_create(
     // would also start placing CPU-resident weights in that buffer type; keep
     // their placement exactly as it was.
     mp.no_host = true;
+    mp.progress_callback = progress_report;
+    mp.progress_callback_user_data = progress;
     if (maybe_params) {
         mp.n_gpu_layers = maybe_params->n_gpu_layers;
     }
@@ -331,13 +370,45 @@ static bool model_create(
     return true;
 }
 
+// Returns its stream and future first, then loads and hands the model over.
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(
         exports_cosmonic_llama_cpp_api_stream_u8_t data,
         uint64_t size,
         exports_cosmonic_llama_cpp_api_model_params_t * maybe_params) {
-    exports_cosmonic_llama_cpp_api_result_own_model_string_t ret;
-    ret.is_err = !model_create(data, size, maybe_params, &ret.val.ok, &ret.val.err);
+    load_progress_t progress = {0};
+    exports_cosmonic_llama_cpp_api_future_result_own_model_string_writer_t writer;
+    exports_cosmonic_llama_cpp_api_tuple2_stream_f32_future_result_own_model_string_t ret = {
+        .f0 = exports_cosmonic_llama_cpp_api_stream_f32_new(&progress.writer),
+        .f1 = exports_cosmonic_llama_cpp_api_future_result_own_model_string_new(&writer),
+    };
     exports_cosmonic_llama_cpp_api_static_model_create_return(ret);
+
+    exports_cosmonic_llama_cpp_api_result_own_model_string_t result;
+    result.is_err = !model_load(data, size, maybe_params, &progress, &result.val.ok, &result.val.err);
+    progress_settle(&progress);
+    exports_cosmonic_llama_cpp_api_stream_f32_drop_writable(progress.writer);
+
+    provider_waitable_status_t st =
+        exports_cosmonic_llama_cpp_api_future_result_own_model_string_write(writer, &result);
+    if (st == PROVIDER_WAITABLE_STATUS_BLOCKED) {
+        // Blocks rather than returning WAIT: wasmtime traps with "handle is not
+        // an waitable-set" on a WAIT from this export after its task.return.
+        provider_waitable_set_t wait_set = provider_waitable_set_new();
+        provider_waitable_join(writer, wait_set);
+        provider_event_t ev;
+        do {
+            provider_waitable_set_wait(wait_set, &ev);
+        } while (ev.event != PROVIDER_EVENT_FUTURE_WRITE || ev.waitable != writer);
+        st = ev.code;
+        provider_waitable_join(writer, 0);
+        provider_waitable_set_drop(wait_set);
+    }
+    // A reader that hung up never took the model, so it is still ours to drop.
+    if (PROVIDER_WAITABLE_STATE(st) != PROVIDER_WAITABLE_COMPLETED && !result.is_err) {
+        exports_cosmonic_llama_cpp_api_model_drop_own(result.val.ok);
+    }
+    exports_cosmonic_llama_cpp_api_result_own_model_string_free(&result);
+    exports_cosmonic_llama_cpp_api_future_result_own_model_string_drop_writable(writer);
     return PROVIDER_CALLBACK_CODE_EXIT;
 }
 

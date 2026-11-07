@@ -6,9 +6,10 @@ use crate::models;
 
 pub async fn load(source: &models::HfModel) -> Result<Model, String> {
     let (data, size, errors) = models::stream(source)?;
-    Model::create(data, size, Some(ModelParams { n_gpu_layers: 99 }))
-        .await
-        .map_err(|e| errors.explain(e))
+    let (progress, model) = Model::create(data, size, Some(ModelParams { n_gpu_layers: 99 })).await;
+    // Dropped unread, so the provider loads with no one reading its progress.
+    drop(progress);
+    model.await.map_err(|e| errors.explain(e))
 }
 
 pub fn chain(samplers: Vec<Sampler>) -> Result<Sampler, String> {

@@ -78,7 +78,10 @@ tools (`llama-bench`, `llama-simple`) for wasm32-wasip3, with the headers wasi-l
 the file is never held in linear memory whole. GPU-bound tensors are uploaded through small
 staging buffers. Models over 4 GiB load, as long as the weights that stay on the CPU
 fit in wasm32's 4 GiB of linear memory. The llama.cpp changes this needs are in
-[`patches/`](patches), applied to the fetched checkout and listed above.
+[`patches/`](patches), applied to the fetched checkout and listed above. It returns a
+`stream<f32>` of the load's progress, from llama.cpp's progress callback, beside a
+future for the model, so a caller that hands over a file it never touches can still
+show how far the load has got.
 
 Fetched dependencies are unpacked into `deps/` and shared by every build directory.
 
