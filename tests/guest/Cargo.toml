@@ -11,6 +11,6 @@ crate-type = ["cdylib"]
 json-schema = []
 
 [dependencies]
-wit-bindgen = { version = "0.62.0", features = ["async"] }
+wit-bindgen = { version = "0.62.0", features = ["async", "async-spawn"] }
 wstd = { version = "0.6.8" }
 serde_json = "1"

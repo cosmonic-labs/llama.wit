@@ -5,7 +5,10 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use wit_bindgen::StreamReader;
 use wstd::http::{Body, BodyExt, Client, Method, Request, Uri};
+
+use crate::wit_stream;
 
 const CACHE_DIR: &str = "/models";
 
@@ -35,8 +38,21 @@ pub const BGE: HfModel = HfModel {
     file: "bge-small-en-v1.5-q8_0.gguf",
 };
 
-pub fn load(model: &HfModel) -> Result<Vec<u8>, String> {
-    download(model).map_err(|e| format!("{}: {e}", model.file))
+/// The model as a `stream<u8>` for `Model::create`, plus its size.
+pub fn load(model: &HfModel) -> Result<(StreamReader<u8>, u64), String> {
+    let bytes = download(model).map_err(|e| format!("{}: {e}", model.file))?;
+    let size = bytes.len() as u64;
+    let (mut tx, rx) = wit_stream::new::<u8>();
+    // A separate task, since the provider reads the stream during `create`
+    wit_bindgen::spawn_local(async move {
+        // One write must stay under the Canonical ABI's 2^28 - 1 item limit
+        for chunk in bytes.chunks(4 << 20) {
+            if !tx.write_all(chunk.to_vec()).await.is_empty() {
+                break;
+            }
+        }
+    });
+    Ok((rx, size))
 }
 
 fn download(model: &HfModel) -> Result<Vec<u8>, Box<dyn Error>> {

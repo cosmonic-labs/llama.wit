@@ -120,8 +120,47 @@ static void log_cb(enum ggml_log_level level, const char * text, void * user) {
 
 // --- model ---
 
+// The Canonical ABI limits one stream read to Buffer.MAX_LENGTH items
+// (CanonicalABI.md: `class Buffer: MAX_LENGTH = 2**28 - 1`), and wasmtime traps
+// on a larger one rather than reading less.
+#define STREAM_MAX_READ ((1u << 28) - 1u)
+
+// Reads the whole stream into `buf`, which holds `size` bytes. llama.cpp's loader
+// seeks backwards, so the GGUF has to be in memory before it starts.
+static bool stream_read_all(
+        exports_cosmonic_llama_cpp_api_stream_u8_t reader, uint8_t * buf, size_t size,
+        provider_string_t * err) {
+    provider_waitable_set_t set = provider_waitable_set_new();
+    provider_waitable_join(reader, set);
+    size_t got = 0;
+    bool ended = false;
+    while (got < size && !ended) {
+        size_t amt = size - got;
+        if (amt > STREAM_MAX_READ) {
+            amt = STREAM_MAX_READ;
+        }
+        provider_waitable_status_t st =
+            exports_cosmonic_llama_cpp_api_stream_u8_read(reader, buf + got, amt);
+        if (st == PROVIDER_WAITABLE_STATUS_BLOCKED) {
+            provider_event_t ev;  // the reader is the set's only waitable
+            provider_waitable_set_wait(set, &ev);
+            st = (provider_waitable_status_t) ev.code;
+        }
+        got += PROVIDER_WAITABLE_COUNT(st);
+        ended = PROVIDER_WAITABLE_STATE(st) != PROVIDER_WAITABLE_COMPLETED;
+    }
+    provider_waitable_join(reader, 0);  // leave the set before dropping it
+    provider_waitable_set_drop(set);
+    if (got < size) {
+        set_err(err, "stream ended before `size` bytes");
+        return false;
+    }
+    return true;
+}
+
 static bool model_create(
-        provider_list_u8_t * data,
+        exports_cosmonic_llama_cpp_api_stream_u8_t data,
+        uint64_t size,
         exports_cosmonic_llama_cpp_api_model_params_t * maybe_params,
         exports_cosmonic_llama_cpp_api_own_model_t * ret,
         provider_string_t * err) {
@@ -136,15 +175,31 @@ static bool model_create(
     if (maybe_params) {
         mp.n_gpu_layers = maybe_params->n_gpu_layers;
     }
+
+    uint8_t * buf = size <= SIZE_MAX ? (uint8_t *) malloc(size ? (size_t) size : 1) : NULL;
+    if (!buf) {
+        exports_cosmonic_llama_cpp_api_stream_u8_drop_readable(data);
+        set_err(err, "model does not fit in memory");
+        return false;
+    }
+    bool read = stream_read_all(data, buf, (size_t) size, err);
+    exports_cosmonic_llama_cpp_api_stream_u8_drop_readable(data);
+    if (!read) {
+        free(buf);
+        return false;
+    }
+
     // fmemopen avoids wasip3's async wasi:filesystem
-    FILE * f = fmemopen(data->ptr, data->len, "rb");
+    FILE * f = fmemopen(buf, (size_t) size, "rb");
     if (!f) {
+        free(buf);
         set_err(err, "fmemopen failed");
         return false;
     }
     // Loading copies the tensors out, so the GGUF bytes can go once the file is closed
     struct llama_model * m = llama_model_load_from_file_ptr(f, mp);
     fclose(f);
+    free(buf);
     if (!m) {
         set_err(err, "failed to load model");
         return false;
@@ -158,11 +213,11 @@ static bool model_create(
 }
 
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(
-        provider_list_u8_t * data,
+        exports_cosmonic_llama_cpp_api_stream_u8_t data,
+        uint64_t size,
         exports_cosmonic_llama_cpp_api_model_params_t * maybe_params) {
     exports_cosmonic_llama_cpp_api_result_own_model_string_t ret;
-    ret.is_err = !model_create(data, maybe_params, &ret.val.ok, &ret.val.err);
-    provider_list_u8_free(data);
+    ret.is_err = !model_create(data, size, maybe_params, &ret.val.ok, &ret.val.err);
     exports_cosmonic_llama_cpp_api_static_model_create_return(ret);
     return PROVIDER_CALLBACK_CODE_EXIT;
 }

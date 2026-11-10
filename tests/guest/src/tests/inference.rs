@@ -5,11 +5,8 @@ use crate::cosmonic::llama_cpp::api::{
 use crate::models;
 
 pub async fn load(source: &models::HfModel) -> Result<Model, String> {
-    Model::create(
-        models::load(source)?,
-        Some(ModelParams { n_gpu_layers: 99 }),
-    )
-    .await
+    let (data, size) = models::load(source)?;
+    Model::create(data, size, Some(ModelParams { n_gpu_layers: 99 })).await
 }
 
 pub fn chain(samplers: Vec<Sampler>) -> Result<Sampler, String> {

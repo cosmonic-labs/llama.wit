@@ -7,9 +7,10 @@ const PROMPT: &str = "Once upon a time";
 const N_GPU_LAYERS: i32 = 99;
 
 pub async fn run() -> Result<(), String> {
-    let bytes = models::load(&models::STORIES_260K)?;
+    let (data, size) = models::load(&models::STORIES_260K)?;
     let model = Model::create(
-        bytes,
+        data,
+        size,
         Some(ModelParams {
             n_gpu_layers: N_GPU_LAYERS,
         }),
