@@ -1,20 +1,12 @@
 //! Load a model, feed it a prompt, generate. If this fails nothing else matters.
 
-use crate::cosmonic::llama_cpp::api::{Context, Model, ModelParams, Sampler};
+use crate::cosmonic::llama_cpp::api::{Context, Sampler};
 use crate::models;
 
 const PROMPT: &str = "Once upon a time";
-const N_GPU_LAYERS: i32 = 99;
 
 pub async fn run() -> Result<(), String> {
-    let bytes = models::load(&models::STORIES_260K)?;
-    let model = Model::create(
-        bytes,
-        Some(ModelParams {
-            n_gpu_layers: N_GPU_LAYERS,
-        }),
-    )
-    .await?;
+    let model = super::inference::load(&models::STORIES_260K).await?;
 
     let context = Context::create(&model, None).await?;
     let prompt = model.tokenize(PROMPT, true, true)?;

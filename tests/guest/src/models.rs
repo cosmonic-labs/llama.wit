@@ -1,11 +1,17 @@
 //! Hugging Face models, cached in the preopened directory so they download once.
 
+use std::cell::RefCell;
 use std::error::Error;
+use std::fmt::Display;
 use std::fs::{self, File};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
+use wit_bindgen::StreamReader;
 use wstd::http::{Body, BodyExt, Client, Method, Request, Uri};
+
+use crate::wit_stream;
 
 const CACHE_DIR: &str = "/models";
 
@@ -35,11 +41,83 @@ pub const BGE: HfModel = HfModel {
     file: "bge-small-en-v1.5-q8_0.gguf",
 };
 
-pub fn load(model: &HfModel) -> Result<Vec<u8>, String> {
-    download(model).map_err(|e| format!("{}: {e}", model.file))
+/// A model as a `stream<u8>` for `Model::create`.
+pub struct ModelStream {
+    pub data: StreamReader<u8>,
+    pub size: u64,
+    pub read_error: ReadError,
 }
 
-fn download(model: &HfModel) -> Result<Vec<u8>, Box<dyn Error>> {
+/// Set if reading the cached file failed partway. The provider then only sees
+/// a short stream, so this says why.
+#[derive(Default)]
+pub struct ReadError(Rc<RefCell<Option<String>>>);
+
+impl ReadError {
+    pub fn is_set(&self) -> bool {
+        self.0.borrow().is_some()
+    }
+
+    /// Adds the read error, if any, to `create`'s error.
+    pub fn explain(&self, create_error: String) -> String {
+        match &*self.0.borrow() {
+            Some(io) => format!("{create_error} ({io})"),
+            None => create_error,
+        }
+    }
+}
+
+/// Streams the cached file a chunk at a time, so the guest never holds it whole
+/// and the provider sees partial and blocked reads.
+pub fn load(model: &HfModel) -> Result<ModelStream, String> {
+    let path = download(model).map_err(|e| file_err(model, e))?;
+    let mut file = File::open(&path).map_err(|e| file_err(model, e))?;
+    let size = file.metadata().map_err(|e| file_err(model, e))?.len();
+    let read_error = ReadError::default();
+    let task_error = read_error.0.clone();
+    let name = model.file;
+    let (mut tx, data) = wit_stream::new::<u8>();
+    // A separate task, since the provider reads the stream during `create`
+    wit_bindgen::spawn_local(async move {
+        // One write must stay under the Canonical ABI's 2^28 - 1 item limit
+        const CHUNK: u64 = 4 << 20;
+        // `write_all` hands the buffer back, so one allocation serves every chunk
+        let mut chunk = Vec::with_capacity(CHUNK.min(size) as usize);
+        loop {
+            chunk.clear();
+            match (&mut file).take(CHUNK).read_to_end(&mut chunk) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(e) => {
+                    *task_error.borrow_mut() = Some(format!("{name}: {e}"));
+                    break;
+                }
+            }
+            chunk = tx.write_all(chunk).await;
+            if !chunk.is_empty() {
+                break; // the provider dropped the stream
+            }
+        }
+    });
+    Ok(ModelStream {
+        data,
+        size,
+        read_error,
+    })
+}
+
+/// The whole cached file, for tests that build their own stream.
+pub fn read(model: &HfModel) -> Result<Vec<u8>, String> {
+    let path = download(model).map_err(|e| file_err(model, e))?;
+    fs::read(&path).map_err(|e| file_err(model, e))
+}
+
+fn file_err(model: &HfModel, e: impl Display) -> String {
+    format!("{}: {e}", model.file)
+}
+
+/// The cached file's path, downloading it first if needed.
+fn download(model: &HfModel) -> Result<PathBuf, Box<dyn Error>> {
     let path = PathBuf::from(CACHE_DIR).join(model.file);
     if !path.exists() {
         fs::create_dir_all(CACHE_DIR)?;
@@ -47,7 +125,7 @@ fn download(model: &HfModel) -> Result<Vec<u8>, Box<dyn Error>> {
         wstd::runtime::block_on(fetch(model.url, &partial))?;
         fs::rename(&partial, &path)?;
     }
-    Ok(fs::read(&path)?)
+    Ok(path)
 }
 
 async fn fetch(url: &str, dest: &Path) -> Result<(), Box<dyn Error>> {

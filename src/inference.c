@@ -1,14 +1,18 @@
 // cosmonic:llama-cpp/api (wit/llama.wit) over llama.cpp's C API
 // Exports own their arguments, so each one frees what it is handed (borrows aside)
+#define _GNU_SOURCE  // fopencookie
 #include "provider.h"
 #include "llama.h"
 
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 
 typedef exports_cosmonic_llama_cpp_api_model_t   model_t;
 typedef exports_cosmonic_llama_cpp_api_context_t context_t;
@@ -120,8 +124,149 @@ static void log_cb(enum ggml_log_level level, const char * text, void * user) {
 
 // --- model ---
 
+// The Canonical ABI limits one stream read to Buffer.MAX_LENGTH items
+// (CanonicalABI.md: `class Buffer: MAX_LENGTH = 2**28 - 1`), and wasmtime traps
+// on a larger one rather than reading less.
+#define STREAM_MAX_READ ((1u << 28) - 1u)
+
+// The GGUF as fixed-size chunks, each allocated only once bytes arrive for it,
+// so a `size` larger than what is sent costs nothing. llama.cpp's loader seeks
+// backwards, so it all has to be in memory before loading starts.
+#define MODEL_FILE_CHUNK ((size_t) 16 << 20)
+// One read fills at most one chunk
+_Static_assert(MODEL_FILE_CHUNK <= STREAM_MAX_READ, "a chunk must fit in one stream read");
+
+typedef struct {
+    uint8_t ** chunks;
+    size_t     n_chunks;
+    size_t     size;
+    size_t     pos;      // the FILE's offset
+} model_file_t;
+
+static void model_file_free(model_file_t * g) {
+    for (size_t i = 0; i < g->n_chunks; i++) {
+        free(g->chunks[i]);
+    }
+    free(g->chunks);
+}
+
+// Checks `size` and allocates the chunk table; the chunks come as bytes arrive.
+static bool model_file_init(model_file_t * g, uint64_t size, provider_string_t * err) {
+    if (size == 0) {
+        set_err(err, "`size` is 0: a GGUF file is never empty");
+        return false;
+    }
+    if (size > SIZE_MAX) {
+        set_err(err, "`size` is larger than the address space");
+        return false;
+    }
+    size_t n_chunks = (size_t) size / MODEL_FILE_CHUNK + ((size_t) size % MODEL_FILE_CHUNK != 0);
+    g->chunks = (uint8_t **) calloc(n_chunks, sizeof(uint8_t *));
+    if (!g->chunks) {
+        set_err(err, "model does not fit in memory");
+        return false;
+    }
+    g->n_chunks = n_chunks;
+    g->size = (size_t) size;
+    return true;
+}
+
+// Reads `size` bytes of the stream into `g`'s chunks. Bytes past `size` are left
+// unread; dropping the reader afterwards ends the writer's side.
+//
+// This waits synchronously, so the instance runs nothing else meanwhile.
+// Returning WAIT from the callback instead needs per-task state, and the C
+// bindings' only slot (context 0) holds the stack pointer under wasm-component-ld.
+static bool model_file_read(
+        model_file_t * g, exports_cosmonic_llama_cpp_api_stream_u8_t reader,
+        provider_string_t * err) {
+    provider_waitable_set_t set = provider_waitable_set_new();
+    provider_waitable_join(reader, set);
+    size_t got = 0;
+    bool ended = false;
+    const char * fail = NULL;
+    while (got < g->size && !ended) {
+        size_t i = got / MODEL_FILE_CHUNK;
+        size_t off = got % MODEL_FILE_CHUNK;
+        size_t len = g->size - i * MODEL_FILE_CHUNK;
+        if (len > MODEL_FILE_CHUNK) {
+            len = MODEL_FILE_CHUNK;
+        }
+        if (!g->chunks[i] && !(g->chunks[i] = (uint8_t *) malloc(len))) {
+            fail = "model does not fit in memory";
+            break;
+        }
+        provider_waitable_status_t st =
+            exports_cosmonic_llama_cpp_api_stream_u8_read(reader, g->chunks[i] + off, len - off);
+        if (st == PROVIDER_WAITABLE_STATUS_BLOCKED) {
+            // A sync wait delivers no CANCEL, but take only this read's event
+            provider_event_t ev;
+            do {
+                provider_waitable_set_wait(set, &ev);
+            } while (ev.event != PROVIDER_EVENT_STREAM_READ || ev.waitable != reader);
+            st = (provider_waitable_status_t) ev.code;
+        }
+        got += PROVIDER_WAITABLE_COUNT(st);
+        ended = PROVIDER_WAITABLE_STATE(st) != PROVIDER_WAITABLE_COMPLETED;
+    }
+    provider_waitable_join(reader, 0);  // leave the set before dropping it
+    provider_waitable_set_drop(set);
+    if (!fail && got < g->size) {
+        fail = "stream ended before `size` bytes";
+    }
+    if (fail) {
+        set_err(err, fail);
+        return false;
+    }
+    return true;
+}
+
+static ssize_t model_file_cookie_read(void * cookie, char * out, size_t n) {
+    model_file_t * g = (model_file_t *) cookie;
+    if (n > SSIZE_MAX) {
+        n = SSIZE_MAX;  // the return is ssize_t, 32-bit on wasm32
+    }
+    size_t done = 0;
+    while (done < n && g->pos < g->size) {
+        size_t i = g->pos / MODEL_FILE_CHUNK;
+        size_t off = g->pos % MODEL_FILE_CHUNK;
+        size_t len = MODEL_FILE_CHUNK - off;
+        if (len > g->size - g->pos) {
+            len = g->size - g->pos;
+        }
+        if (len > n - done) {
+            len = n - done;
+        }
+        memcpy(out + done, g->chunks[i] + off, len);
+        done += len;
+        g->pos += len;
+    }
+    return (ssize_t) done;
+}
+
+static int model_file_cookie_seek(void * cookie, off_t * offset, int whence) {
+    model_file_t * g = (model_file_t *) cookie;
+    if (whence != SEEK_SET && whence != SEEK_CUR && whence != SEEK_END) {
+        errno = EINVAL;
+        return -1;
+    }
+    size_t base = whence == SEEK_SET ? 0 : whence == SEEK_CUR ? g->pos : g->size;
+    off_t off = *offset;
+    // Bounds-check the distance before moving, so a corrupt offset can't
+    // overflow. Unsigned negation gives |off| even for INT64_MIN.
+    uint64_t dist = off < 0 ? 0 - (uint64_t) off : (uint64_t) off;
+    if (off < 0 ? dist > base : dist > g->size - base) {
+        errno = EINVAL;
+        return -1;
+    }
+    g->pos = off < 0 ? base - (size_t) dist : base + (size_t) dist;
+    *offset = (off_t) g->pos;
+    return 0;
+}
+
 static bool model_create(
-        provider_list_u8_t * data,
+        exports_cosmonic_llama_cpp_api_stream_u8_t data,
+        uint64_t size,
         exports_cosmonic_llama_cpp_api_model_params_t * maybe_params,
         exports_cosmonic_llama_cpp_api_own_model_t * ret,
         provider_string_t * err) {
@@ -136,20 +281,39 @@ static bool model_create(
     if (maybe_params) {
         mp.n_gpu_layers = maybe_params->n_gpu_layers;
     }
-    // fmemopen avoids wasip3's async wasi:filesystem
-    FILE * f = fmemopen(data->ptr, data->len, "rb");
-    if (!f) {
-        set_err(err, "fmemopen failed");
+
+    model_file_t g = {0};
+    bool read = model_file_init(&g, size, err) && model_file_read(&g, data, err);
+    // The one drop, whichever step failed, so the writer always sees the end
+    exports_cosmonic_llama_cpp_api_stream_u8_drop_readable(data);
+    if (!read) {
+        model_file_free(&g);
         return false;
     }
+
+    // A cookie FILE avoids wasip3's async wasi:filesystem
+    cookie_io_functions_t io = { .read = model_file_cookie_read, .seek = model_file_cookie_seek };
+    FILE * f = fopencookie(&g, "rb", io);
+    if (!f) {
+        model_file_free(&g);
+        set_err(err, "fopencookie failed");
+        return false;
+    }
+    setvbuf(f, NULL, _IONBF, 0);  // the bytes are already in memory; a buffer only adds a copy
     // Loading copies the tensors out, so the GGUF bytes can go once the file is closed
     struct llama_model * m = llama_model_load_from_file_ptr(f, mp);
     fclose(f);
+    model_file_free(&g);
     if (!m) {
         set_err(err, "failed to load model");
         return false;
     }
     model_t * rep = (model_t *) malloc(sizeof(model_t));
+    if (!rep) {
+        llama_model_free(m);
+        set_err(err, "model does not fit in memory");
+        return false;
+    }
     rep->model = m;
     rep->vocab = llama_model_get_vocab(m);
     rep->refs = 1;
@@ -158,11 +322,11 @@ static bool model_create(
 }
 
 provider_callback_code_t exports_cosmonic_llama_cpp_api_static_model_create(
-        provider_list_u8_t * data,
+        exports_cosmonic_llama_cpp_api_stream_u8_t data,
+        uint64_t size,
         exports_cosmonic_llama_cpp_api_model_params_t * maybe_params) {
     exports_cosmonic_llama_cpp_api_result_own_model_string_t ret;
-    ret.is_err = !model_create(data, maybe_params, &ret.val.ok, &ret.val.err);
-    provider_list_u8_free(data);
+    ret.is_err = !model_create(data, size, maybe_params, &ret.val.ok, &ret.val.err);
     exports_cosmonic_llama_cpp_api_static_model_create_return(ret);
     return PROVIDER_CALLBACK_CODE_EXIT;
 }

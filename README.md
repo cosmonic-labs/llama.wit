@@ -67,8 +67,9 @@ rustup target add wasm32-wasip2
 ./tests/run.sh
 ```
 
-The default suite uses a 1.1 MiB model to check token bytes, chat templates, context limits,
-logit bias, grammar constraints, embeddings, and prompt reuse against fresh inference.
+The default suite uses a 1.1 MiB model to check model streaming, token bytes, chat templates,
+context limits, logit bias, grammar constraints, embeddings, and prompt reuse against fresh
+inference.
 When the component was built with `LLAMA_WIT_JSON_SCHEMA=ON`, it also tests the converter.
 Models are cached in `tests/guest-dir/models`.
 
