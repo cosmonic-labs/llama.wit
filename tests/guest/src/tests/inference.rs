@@ -3,13 +3,18 @@ use crate::cosmonic::llama_cpp::api::{
     chat_apply_template,
 };
 use crate::models;
+use crate::wit_stream;
+
+/// Offload every layer, so the GPU backend is exercised.
+pub fn model_params() -> Option<ModelParams> {
+    Some(ModelParams { n_gpu_layers: 99 })
+}
 
 pub async fn load(source: &models::HfModel) -> Result<Model, String> {
-    Model::create(
-        models::load(source)?,
-        Some(ModelParams { n_gpu_layers: 99 }),
-    )
-    .await
+    let stream = models::load(source)?;
+    Model::create(stream.data, stream.size, model_params())
+        .await
+        .map_err(|e| stream.read_error.explain(e))
 }
 
 pub fn chain(samplers: Vec<Sampler>) -> Result<Sampler, String> {
@@ -338,5 +343,52 @@ pub async fn reuse(source: &models::HfModel, rounds: u32) -> Result<(), String> 
             ));
         }
     }
+    Ok(())
+}
+
+/// `size` must match the bytes sent: too few fail, and anything past it is
+/// ignored, whether or not the writer closes the stream.
+pub async fn model_stream() -> Result<(), String> {
+    // Rejected before reading, so the stream needs no bytes
+    let (tx, rx) = wit_stream::new::<u8>();
+    drop(tx);
+    match Model::create(rx, 0, model_params()).await {
+        Err(e) if e.contains("is 0") => {}
+        other => return Err(format!("size 0: {:?}", other.map(|_| ()))),
+    }
+
+    let stream = models::load(&models::STORIES_260K)?;
+    let created = Model::create(stream.data, stream.size + 1, model_params()).await;
+    match created.map(|_| ()) {
+        // A failed file read also ends the stream early, so rule it out
+        Err(e) if e.contains("ended before") && !stream.read_error.is_set() => {}
+        other => {
+            let other = other.map_err(|e| stream.read_error.explain(e));
+            return Err(format!("size past the end: {other:?}"));
+        }
+    }
+
+    let bytes = models::read(&models::STORIES_260K)?;
+    let size = bytes.len() as u64;
+
+    // Bytes past `size` are left unread, and the provider drops the stream
+    let mut padded = bytes.clone();
+    padded.extend_from_slice(&[0xAB; 4096]);
+    let (mut tx, rx) = wit_stream::new::<u8>();
+    let (created, unsent) = futures::join!(Model::create(rx, size, model_params()), tx.write_all(padded));
+    created.map_err(|e| format!("stream longer than size: {e}"))?;
+    if unsent.len() != 4096 {
+        return Err(format!("{} of the 4096 bytes past `size` were left unread", unsent.len()));
+    }
+
+    // `tx` lives in this scope, so it is still open when `create` returns; a
+    // provider that waited for the stream to close would hang here
+    let (mut tx, rx) = wit_stream::new::<u8>();
+    let (created, unsent) = futures::join!(Model::create(rx, size, model_params()), tx.write_all(bytes));
+    created.map_err(|e| format!("writer left open: {e}"))?;
+    if !unsent.is_empty() {
+        return Err("the provider dropped the stream before `size` bytes".into());
+    }
+    drop(tx);
     Ok(())
 }

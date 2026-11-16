@@ -17,6 +17,7 @@ static TESTS: &[(&str, TestFn)] = &[
     ("token-bytes", || Box::pin(inference::token_bytes())),
     ("chat-template", || Box::pin(inference::chat_template())),
     ("model-lifetime", || Box::pin(inference::model_lifetime())),
+    ("model-stream", || Box::pin(inference::model_stream())),
     ("context-limits", || Box::pin(inference::context_limits())),
     ("sampling", || Box::pin(inference::sampling())),
     ("grammar", || Box::pin(inference::grammar())),

@@ -1132,6 +1132,7 @@ dependencies = [
 name = "guest"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "serde_json",
  "wit-bindgen 0.62.0",
  "wstd",
@@ -3805,6 +3806,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "53cb4b5556c3a791e86838ea287782bdafa704d55b0e68b5b81a3a16b9ea5f4b"
 dependencies = [
  "bitflags 2.13.2",
+ "futures",
  "wit-bindgen-rust-macro",
 ]
 
