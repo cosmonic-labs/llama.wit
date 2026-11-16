@@ -7,7 +7,7 @@ include(FetchContent)
 # > this option is turned on by default for the moment
 add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-mllvm;-wasm-use-legacy-eh=false>")
 
-set(LLAMA_GIT_TAG b11514 CACHE STRING "llama.cpp release tag to build")
+set(LLAMA_GIT_TAG b12135 CACHE STRING "llama.cpp release tag to build")
 option(LLAMA_WIT_JSON_SCHEMA "Build the provider-with-json-schema world, which also exports llama.cpp's JSON Schema to GBNF converter" OFF)
 
 # Trim llama.cpp to just the static libs we link.
